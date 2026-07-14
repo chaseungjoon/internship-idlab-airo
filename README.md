@@ -14,6 +14,12 @@
 
 # Plan
 
+## MVP
+
+1. Use `.urdf` in Drake to simulate gripper and grab simulation
+2. Rotate wrist a few times and render, and pretrain
+3. Using UR3, test frame capture
+
 ## Task Scope
 
 ## Actions
