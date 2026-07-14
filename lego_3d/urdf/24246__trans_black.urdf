@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<robot name="24246__trans_black">
+  <link name="24246__trans_black">
+    <inertial>
+      <origin xyz="-0.000000 0.000406 -0.001377" rpy="0 0 0"/>
+      <mass value="0.000153"/>
+      <inertia ixx="9.036803499e-10" ixy="8.692770639e-27" ixz="-7.147934925e-27" iyy="9.288905091e-10" iyz="4.135112173e-12" izz="1.597359465e-09"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="../meshes/visual/24246.obj" scale="1 1 1"/>
+      </geometry>
+      <material name="24246__trans_black_color">
+        <color rgba="0.150 0.150 0.150 0.400"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="../meshes/collision/24246_hull.obj" scale="1 1 1"/>
+      </geometry>
+    </collision>
+  </link>
+</robot>

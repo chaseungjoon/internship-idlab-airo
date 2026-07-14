@@ -1,0 +1,45 @@
+<?xml version="1.0" ?>
+<robot name="wall">
+
+    <link name="base_link"/>
+
+    <link name="wall_link">
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.25 4 2"/>
+            </geometry>
+            <material name="wall_material">
+                <color rgba="0.7 0.7 0.7 1"/>
+            </material>
+        </visual>
+        <collision>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.25 4 2"/>
+            </geometry>
+        </collision>
+        <inertial>
+            <mass value="1000.0"/>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <inertia ixx="33.34" ixy="0.0" ixz="0.0" iyy="133.10417" iyz="0.0" izz="166.67"/>
+        </inertial>
+    </link>
+
+    <joint name="base_link_2_wall_link" type="fixed">
+        <parent link="base_link"/>
+        <child link="wall_link"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+    </joint>
+
+
+    <!-- Virtual links, i.e. useful frames -->
+    <link name="wall_bottom"/>
+
+    <joint name="wall_link_2_wall_bottom" type="fixed">
+        <parent link="wall_link"/>
+        <child link="wall_bottom"/>
+        <origin xyz="-0.125 0 -1.0" rpy="0 0 0"/>
+    </joint>
+
+</robot>

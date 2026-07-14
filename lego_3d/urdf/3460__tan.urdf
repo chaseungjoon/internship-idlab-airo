@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<robot name="3460__tan">
+  <link name="3460__tan">
+    <inertial>
+      <origin xyz="-0.000000 0.000000 -0.000949" rpy="0 0 0"/>
+      <mass value="0.002390"/>
+      <inertia ixx="1.581805244e-08" ixy="-1.357093192e-24" ixz="5.363858568e-24" iyy="8.080691893e-07" iyz="-4.523643975e-25" izz="8.154636233e-07"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="../meshes/visual/3460.obj" scale="1 1 1"/>
+      </geometry>
+      <material name="3460__tan_color">
+        <color rgba="0.860 0.770 0.610 1.000"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="../meshes/collision/3460_hull.obj" scale="1 1 1"/>
+      </geometry>
+    </collision>
+  </link>
+</robot>

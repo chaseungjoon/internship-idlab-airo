@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<robot name="90398__white">
+  <link name="90398__white">
+    <inertial>
+      <origin xyz="0.000000 0.000063 0.006062" rpy="0 0 0"/>
+      <mass value="0.000398"/>
+      <inertia ixx="6.550054219e-09" ixy="-2.870003692e-26" ixz="1.605443772e-25" iyy="7.015306480e-09" iyz="-7.116131411e-11" izz="1.891559389e-09"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="../meshes/visual/90398.obj" scale="1 1 1"/>
+      </geometry>
+      <material name="90398__white_color">
+        <color rgba="0.950 0.950 0.950 1.000"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="../meshes/collision/90398_hull.obj" scale="1 1 1"/>
+      </geometry>
+    </collision>
+  </link>
+</robot>

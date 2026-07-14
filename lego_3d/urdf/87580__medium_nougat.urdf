@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<robot name="87580__medium_nougat">
+  <link name="87580__medium_nougat">
+    <inertial>
+      <origin xyz="0.000000 -0.000000 -0.001195" rpy="0 0 0"/>
+      <mass value="0.001051"/>
+      <inertia ixx="2.218101985e-08" ixy="-1.130910994e-25" ixz="-3.667220265e-25" iyy="2.218101985e-08" iyz="1.031092543e-25" izz="4.142080403e-08"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="../meshes/visual/87580.obj" scale="1 1 1"/>
+      </geometry>
+      <material name="87580__medium_nougat_color">
+        <color rgba="0.680 0.480 0.310 1.000"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="../meshes/collision/87580_hull.obj" scale="1 1 1"/>
+      </geometry>
+    </collision>
+  </link>
+</robot>

@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<robot name="22886__light_bluish_gray">
+  <link name="22886__light_bluish_gray">
+    <inertial>
+      <origin xyz="-0.000000 0.000000 -0.013824" rpy="0 0 0"/>
+      <mass value="0.004024"/>
+      <inertia ixx="3.224159119e-07" ixy="6.149328528e-25" ixz="2.369595684e-23" iyy="3.864556496e-07" iyz="-1.447566072e-23" izz="1.064464078e-07"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="../meshes/visual/22886.obj" scale="1 1 1"/>
+      </geometry>
+      <material name="22886__light_bluish_gray_color">
+        <color rgba="0.630 0.650 0.650 1.000"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="../meshes/collision/22886_hull.obj" scale="1 1 1"/>
+      </geometry>
+    </collision>
+  </link>
+</robot>

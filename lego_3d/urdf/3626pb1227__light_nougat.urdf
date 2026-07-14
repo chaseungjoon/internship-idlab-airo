@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<robot name="3626pb1227__light_nougat">
+  <link name="3626pb1227__light_nougat">
+    <inertial>
+      <origin xyz="-0.000000 0.000000 -0.004183" rpy="0 0 0"/>
+      <mass value="0.000814"/>
+      <inertia ixx="1.122966066e-08" ixy="-2.120458113e-26" ixz="2.549009764e-25" iyy="1.122966066e-08" iyz="-2.172782771e-25" izz="9.746369639e-09"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="../meshes/visual/3626.obj" scale="1 1 1"/>
+      </geometry>
+      <material name="3626pb1227__light_nougat_color">
+        <color rgba="0.940 0.800 0.690 1.000"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="../meshes/collision/3626_hull.obj" scale="1 1 1"/>
+      </geometry>
+    </collision>
+  </link>
+</robot>

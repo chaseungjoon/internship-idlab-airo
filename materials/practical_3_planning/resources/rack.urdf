@@ -1,0 +1,81 @@
+<?xml version="1.0" ?>
+<robot name="wooden_rack">
+    <material name="wood_material">
+        <color rgba="0.76 0.69 0.63 1"/>
+    </material>
+
+    <link name="base_link"/>
+
+    <link name="backplate">
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.018 0.287 0.536"/>
+            </geometry>
+            <material name="wood_material"/>
+        </visual>
+        <collision>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.018 0.287 0.536"/>
+            </geometry>
+        </collision>
+        <inertial>
+            <mass value="1.0"/>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <inertia ixx="0.024" ixy="0.0" ixz="0.0" iyy="0.0308" iyz="0.0" izz="0.0069"/>
+        </inertial>
+    </link>
+
+    <link name="lower_shelf_link">
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.15 0.287 0.018"/>
+            </geometry>
+            <material name="wood_material"/>
+        </visual>
+        <collision>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.15 0.287 0.018"/>
+            </geometry>
+        </collision>
+        <inertial>
+            <mass value="0.25"/>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <inertia ixx="0.0069" ixy="0.0" ixz="0.0" iyy="0.0019" iyz="0.0" izz="0.0087"/>
+        </inertial>
+    </link>
+
+    <!--    LINK EVERYTHING TOGETHER-->
+
+    <joint name="base_link_2_backplate" type="fixed">
+        <parent link="base_link"/>
+        <child link="backplate"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+    </joint>
+
+    <joint name="backplate_2_lower_shelf_link" type="fixed">
+        <parent link="backplate"/>
+        <child link="lower_shelf_link"/>
+        <origin xyz="0.084 0 0" rpy="0 0 0"/> <!-- x=0.075+0.018/2 -->
+    </joint>
+
+    <!-- Virtual links, i.e. useful frames -->
+    <link name="backplate_centre"/>
+
+    <joint name="backplate_base_2_backplate_centre" type="fixed">
+        <parent link="backplate"/>
+        <child link="backplate_centre"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+    </joint>
+
+    <link name="backplate_lower_centre"/>
+    <joint name="backplate_lower_2_backplate_lower_centre" type="fixed">
+        <parent link="backplate"/>
+        <child link="backplate_lower_centre"/>
+        <origin xyz="0 0 -0.268" rpy="0 0 0"/>
+    </joint>
+
+</robot>
