@@ -16,12 +16,14 @@ if str(KINEMATICS_DIR) not in sys.path:
 
 from kinematics import RobotKinematics
 from scene import (
+    CAMERA_TOOL0_OFFSET,
     GRIPPER_CLOSED,
     GRIPPER_OPEN,
     ROBOT_OFFSET_X,
     ROBOT_OFFSET_Y,
     TABLE_LENGTH,
     TABLE_WIDTH,
+    TCP_OFFSET,
     build_arm_gripper_scene,
     resting_z_offset,
     set_gripper_opening,
@@ -44,16 +46,48 @@ INTER_BRICK_PAUSE = 2.0
 LIFT_HEIGHT = 0.15
 PREGRASP_CLEARANCE = 0.12
 
-MIN_REACH = 0.30
+MIN_REACH = 0.25
 MAX_REACH = 0.45
 MAX_SAMPLE_ATTEMPTS = 20
 
 MIN_HEIGHT_ABOVE_TABLE = 0.002
 MAX_HEIGHT_ABOVE_TABLE = 0.05
-BASE_EXCLUSION_RADIUS = 0.27
+BASE_EXCLUSION_RADIUS = 0.15
 
 GRASP_ROTATION_BASE = RotationMatrix.MakeXRotation(np.pi)
-OBSERVE_CONFIGURATION = np.array([np.pi, -2.0, 2.3, -np.pi / 2, -np.pi / 2, 0.0])
+
+OBSERVE_EYE_RADIUS = 0.15
+OBSERVE_EYE_HEIGHT = 0.4
+OBSERVE_EYE_ANGLE = np.deg2rad(35)
+OBSERVE_TARGET = np.array([0.2, 0.15, 0.0])
+OBSERVE_INITIAL_GUESS = np.array([0.0, -np.pi / 2, np.pi / 2, -np.pi / 2, -np.pi / 2, 0.0])
+
+
+def _look_at_rotation(eye: np.ndarray, target: np.ndarray) -> np.ndarray:
+    forward = target - eye
+    forward = forward / np.linalg.norm(forward)
+    world_up = np.array([0.0, 0.0, 1.0])
+    if abs(np.dot(forward, world_up)) > 0.97:
+        world_up = np.array([1.0, 0.0, 0.0])
+    right = np.cross(forward, world_up)
+    right = right / np.linalg.norm(right)
+    true_up = np.cross(right, forward)
+    return np.column_stack([right, -true_up, forward])
+
+
+def _observe_tcp_pose() -> RigidTransform:
+    eye = np.array(
+        [
+            OBSERVE_EYE_RADIUS * np.cos(OBSERVE_EYE_ANGLE),
+            OBSERVE_EYE_RADIUS * np.sin(OBSERVE_EYE_ANGLE),
+            OBSERVE_EYE_HEIGHT,
+        ]
+    )
+    R_camera = _look_at_rotation(eye, OBSERVE_TARGET)
+    X_W_Camera = RigidTransform(RotationMatrix(R_camera), eye)
+    X_Tool0_Tcp = RigidTransform(RotationMatrix.Identity(), [0, 0, TCP_OFFSET])
+    X_Tcp_Camera = X_Tool0_Tcp.inverse() @ CAMERA_TOOL0_OFFSET
+    return X_W_Camera @ X_Tcp_Camera.inverse()
 
 
 def _interpolate(start, end, num_steps: int):
@@ -149,9 +183,13 @@ def run_pick_demo(meshcat: Meshcat, brick_urdf_path: Path, rng_seed=None) -> Non
     plant_context = plant.GetMyContextFromRoot(context)
     kinematics = RobotKinematics(scene.robot_diagram, scene.arm_index, meshcat=meshcat)
 
-    plant.SetPositions(plant_context, scene.arm_index, OBSERVE_CONFIGURATION)
-    set_gripper_opening(plant, plant_context, scene.gripper_index, GRIPPER_OPEN)
     X_W_Base = plant.GetFrameByName("base", scene.arm_index).CalcPoseInWorld(plant_context)
+    observe_configuration = _solve_ik(
+        kinematics, plant, scene.arm_index, X_W_Base, _observe_tcp_pose(), OBSERVE_INITIAL_GUESS
+    )
+
+    plant.SetPositions(plant_context, scene.arm_index, observe_configuration)
+    set_gripper_opening(plant, plant_context, scene.gripper_index, GRIPPER_OPEN)
     scene.robot_diagram.ForcedPublish(context)
     time.sleep(STEP_DELAY * 4)
 
@@ -164,7 +202,8 @@ def run_pick_demo(meshcat: Meshcat, brick_urdf_path: Path, rng_seed=None) -> Non
         plant.SetFreeBodyPose(plant_context, brick_body, X_W_GroundTruth)
         scene.robot_diagram.ForcedPublish(context)
 
-        points = capture_world_points(plant, context, scene.camera_sensor, scene.camera_pose)
+        camera_pose = scene.arm_camera_frame.CalcPoseInWorld(plant_context)
+        points = capture_world_points(plant, context, scene.camera_sensor, camera_pose)
         estimate = estimate_brick_pose(points)
         if estimate is None:
             continue
@@ -174,7 +213,7 @@ def run_pick_demo(meshcat: Meshcat, brick_urdf_path: Path, rng_seed=None) -> Non
         X_W_Grasp = RigidTransform(grasp_rotation, [x, y, 0.0])
         X_W_Lift = RigidTransform(grasp_rotation, [x, y, LIFT_HEIGHT])
         try:
-            q_pregrasp = _solve_ik(kinematics, plant, scene.arm_index, X_W_Base, X_W_Pregrasp, OBSERVE_CONFIGURATION)
+            q_pregrasp = _solve_ik(kinematics, plant, scene.arm_index, X_W_Base, X_W_Pregrasp, observe_configuration)
             q_grasp = _solve_ik(kinematics, plant, scene.arm_index, X_W_Base, X_W_Grasp, q_pregrasp)
             q_lift = _solve_ik(kinematics, plant, scene.arm_index, X_W_Base, X_W_Lift, q_grasp)
             break
@@ -186,7 +225,7 @@ def run_pick_demo(meshcat: Meshcat, brick_urdf_path: Path, rng_seed=None) -> Non
     print(f"  Perceived brick at (x={x:.3f}, y={y:.3f}, yaw={yaw:.2f}) from RGBD camera")
 
     print("  Reaching towards the brick...")
-    for q in _interpolate(OBSERVE_CONFIGURATION, q_pregrasp, REACH_STEPS):
+    for q in _interpolate(observe_configuration, q_pregrasp, REACH_STEPS):
         plant.SetPositions(plant_context, scene.arm_index, q)
         scene.robot_diagram.ForcedPublish(context)
         time.sleep(STEP_DELAY)
@@ -228,3 +267,4 @@ if __name__ == "__main__":
     meshcat = Meshcat()
     print(f"Meshcat running at {meshcat.web_url()}")
     run_all(meshcat)
+    print("Done")

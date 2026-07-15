@@ -20,7 +20,7 @@ from pydrake.geometry import (
     RenderEngineVtkParams,
     Role,
 )
-from pydrake.math import RigidTransform, RollPitchYaw, RotationMatrix
+from pydrake.math import RigidTransform, RotationMatrix
 from pydrake.multibody.tree import FixedOffsetFrame
 from pydrake.planning import RobotDiagramBuilder
 from pydrake.systems.sensors import CameraInfo, RgbdSensor
@@ -151,12 +151,10 @@ TABLE_CENTER_Y = TABLE_WIDTH / 2 - ROBOT_OFFSET_Y
 ROBOT_BASE_YAW = np.arctan2(TABLE_CENTER_Y, TABLE_CENTER_X)
 
 CAMERA_RENDERER_NAME = "vtk_renderer"
-CAMERA_HEIGHT = 0.75
-CAMERA_LOOKAT_X = 0.46
-CAMERA_LOOKAT_Y = 0.33
 CAMERA_WIDTH_PX = 640
 CAMERA_HEIGHT_PX = 480
-CAMERA_FOV_Y = np.pi / 4
+CAMERA_FOV_Y = np.deg2rad(70)
+CAMERA_TOOL0_OFFSET = RigidTransform(RotationMatrix.MakeYRotation(np.deg2rad(30)), [0.20, 0.0, 0.02])
 
 
 @dataclass
@@ -170,7 +168,7 @@ class ArmGripperScene:
     arm_tcp_frame: object
     scattered_brick_indices: list = field(default_factory=list)
     camera_sensor: Optional[RgbdSensor] = None
-    camera_pose: Optional[RigidTransform] = None
+    arm_camera_frame: object = None
 
 
 def add_meshcat_visualizer(robot_diagram_builder: RobotDiagramBuilder, meshcat: Meshcat = None) -> Meshcat:
@@ -210,26 +208,22 @@ def _sample_table_pose(
     return RigidTransform(RotationMatrix.MakeZRotation(yaw), [x, y, z])
 
 
-def camera_pose_overhead() -> RigidTransform:
-    return RigidTransform(RollPitchYaw(np.pi, 0, 0), [CAMERA_LOOKAT_X, CAMERA_LOOKAT_Y, CAMERA_HEIGHT])
-
-
-def _add_overhead_camera(robot_diagram_builder: RobotDiagramBuilder, plant) -> RgbdSensor:
+def _add_wrist_camera(robot_diagram_builder: RobotDiagramBuilder, plant, arm_index) -> RgbdSensor:
     scene_graph = robot_diagram_builder.scene_graph()
     scene_graph.AddRenderer(CAMERA_RENDERER_NAME, MakeRenderEngineVtk(RenderEngineVtkParams()))
 
     intrinsics = CameraInfo(width=CAMERA_WIDTH_PX, height=CAMERA_HEIGHT_PX, fov_y=CAMERA_FOV_Y)
-    clipping = ClippingRange(0.1, 3.0)
+    clipping = ClippingRange(0.05, 3.0)
     color_camera = ColorRenderCamera(RenderCameraCore(CAMERA_RENDERER_NAME, intrinsics, clipping, RigidTransform()))
     depth_camera = DepthRenderCamera(
-        RenderCameraCore(CAMERA_RENDERER_NAME, intrinsics, clipping, RigidTransform()), DepthRange(0.1, 3.0)
+        RenderCameraCore(CAMERA_RENDERER_NAME, intrinsics, clipping, RigidTransform()), DepthRange(0.05, 3.0)
     )
 
-    world_id = plant.GetBodyFrameIdOrThrow(plant.world_body().index())
-    X_W_Cam = camera_pose_overhead()
+    tool0_body = plant.GetBodyByName("tool0", arm_index)
+    tool0_frame_id = plant.GetBodyFrameIdOrThrow(tool0_body.index())
 
     builder = robot_diagram_builder.builder()
-    sensor = builder.AddSystem(RgbdSensor(world_id, X_W_Cam, color_camera, depth_camera))
+    sensor = builder.AddSystem(RgbdSensor(tool0_frame_id, CAMERA_TOOL0_OFFSET, color_camera, depth_camera))
     builder.Connect(scene_graph.get_query_output_port(), sensor.query_object_input_port())
     return sensor
 
@@ -251,8 +245,6 @@ def build_arm_gripper_scene(
     meshcat.DeleteAddedControls()
     add_meshcat_visualizer(robot_diagram_builder, meshcat)
 
-    camera_sensor = _add_overhead_camera(robot_diagram_builder, plant) if add_camera else None
-
     arm_urdf_path = airo_models.get_urdf_path("ur3e")
 
     resolved_brick_urdf = ensure_renderable_urdf(brick_urdf_path) if add_camera else Path(brick_urdf_path).resolve()
@@ -266,6 +258,8 @@ def build_arm_gripper_scene(
 
     scattered_brick_indices = [parser.AddModels(str(p))[0] for p in resolved_scattered_urdfs]
 
+    camera_sensor = _add_wrist_camera(robot_diagram_builder, plant, arm_index) if add_camera else None
+
     world_frame = plant.world_frame()
     arm_frame = plant.GetFrameByName("base_link", arm_index)
     arm_tool_frame = plant.GetFrameByName("tool0", arm_index)
@@ -277,6 +271,7 @@ def build_arm_gripper_scene(
 
     X_Tool0Tcp = RigidTransform(RotationMatrix.Identity(), [0, 0, TCP_OFFSET])
     arm_tcp_frame = plant.AddFrame(FixedOffsetFrame("tcp", arm_tool_frame, X_Tool0Tcp))
+    arm_camera_frame = plant.AddFrame(FixedOffsetFrame("camera", arm_tool_frame, CAMERA_TOOL0_OFFSET))
 
     if add_table:
         _add_table(plant)
@@ -302,7 +297,7 @@ def build_arm_gripper_scene(
         arm_tcp_frame=arm_tcp_frame,
         scattered_brick_indices=scattered_brick_indices,
         camera_sensor=camera_sensor,
-        camera_pose=camera_pose_overhead() if add_camera else None,
+        arm_camera_frame=arm_camera_frame if add_camera else None,
     )
 
 
