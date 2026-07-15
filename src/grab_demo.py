@@ -51,22 +51,20 @@ def run_grab_demo(
     demo; pass larger step counts (e.g. from submodule_0) to watch every
     movement clearly.
     """
-    (
-        robot_diagram,
-        context,
-        plant,
-        arm_index,
-        gripper_index,
-        brick_index,
-        arm_tcp_frame,
-        _scattered_brick_indices,
-    ) = build_arm_gripper_scene(
+    scene = build_arm_gripper_scene(
         meshcat,
         brick_urdf_path=brick_urdf_path,
         add_table=add_table,
         scattered_brick_urdf_paths=scattered_brick_urdf_paths,
         rng_seed=rng_seed,
     )
+    robot_diagram = scene.robot_diagram
+    context = scene.context
+    plant = scene.plant
+    arm_index = scene.arm_index
+    gripper_index = scene.gripper_index
+    brick_index = scene.brick_index
+    arm_tcp_frame = scene.arm_tcp_frame
     plant_context = plant.GetMyContextFromRoot(context)
     set_gripper_opening(plant, plant_context, gripper_index, GRIPPER_OPEN)
 

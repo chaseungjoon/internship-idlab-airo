@@ -15,7 +15,7 @@ if str(KINEMATICS_DIR) not in sys.path:
     sys.path.insert(0, str(KINEMATICS_DIR))
 
 from kinematics import RobotKinematics
-from scene import(
+from scene import (
     GRIPPER_CLOSED,
     GRIPPER_OPEN,
     ROBOT_OFFSET_X,
@@ -23,20 +23,19 @@ from scene import(
     TABLE_LENGTH,
     TABLE_WIDTH,
     build_arm_gripper_scene,
+    resting_z_offset,
     set_gripper_opening,
 )
 
 LEGO_URDF_DIR = SRC_DIR.parent / "lego_3d" / "urdf"
 
 BRICK_URDFS = {
+    "69729": LEGO_URDF_DIR / "69729__light_bluish_gray.urdf",
     "3008": LEGO_URDF_DIR / "3008__tan.urdf",
     "3021": LEGO_URDF_DIR / "3021__tan.urdf",
-    "69729": LEGO_URDF_DIR / "69729__light_bluish_gray.urdf"
 }
 
-SCATTERED_BRICK_URDFS = list(BRICK_URDFS.values()) * 3
-
-STEP_DELAY = 0.05 
+STEP_DELAY = 0.05
 REACH_STEPS = 40
 DESCEND_STEPS = 25
 GRIPPER_STEPS = 30
@@ -44,14 +43,17 @@ LIFT_STEPS = 40
 INTER_BRICK_PAUSE = 2.0
 LIFT_HEIGHT = 0.15
 PREGRASP_CLEARANCE = 0.12
-GRASP_HEIGHT = 0.01
 
-MIN_REACH = 0.20 
-MAX_REACH = 0.40
-
-GRASP_ROTATION = RotationMatrix.MakeXRotation(np.pi)
-HOME_CONFIGURATION = np.array([0.0, -np.pi / 2, np.pi / 2, -np.pi / 2, -np.pi / 2, 0.0])
+MIN_REACH = 0.30
+MAX_REACH = 0.45
 MAX_SAMPLE_ATTEMPTS = 20
+
+MIN_HEIGHT_ABOVE_TABLE = 0.002
+MAX_HEIGHT_ABOVE_TABLE = 0.05
+BASE_EXCLUSION_RADIUS = 0.27
+
+GRASP_ROTATION_BASE = RotationMatrix.MakeXRotation(np.pi)
+OBSERVE_CONFIGURATION = np.array([np.pi, -2.0, 2.3, -np.pi / 2, -np.pi / 2, 0.0])
 
 
 def _interpolate(start, end, num_steps: int):
@@ -61,12 +63,11 @@ def _interpolate(start, end, num_steps: int):
 
 
 def _brick_body_name(plant, brick_index) -> str:
-    """The lego_3d URDFs are single-link models named after the part; look up that name."""
     body_indices = plant.GetBodyIndices(brick_index)
     return plant.get_body(body_indices[0]).name()
 
 
-def _sample_target_pose(rng: np.random.Generator):
+def _sample_ground_truth_pose(rng: np.random.Generator, z: float):
     x_min, x_max = -ROBOT_OFFSET_X, TABLE_LENGTH - ROBOT_OFFSET_X
     y_min, y_max = -ROBOT_OFFSET_Y, TABLE_WIDTH - ROBOT_OFFSET_Y
 
@@ -82,7 +83,50 @@ def _sample_target_pose(rng: np.random.Generator):
         x, y = radius * np.cos(angle), radius * np.sin(angle)
 
     yaw = rng.uniform(0, 2 * np.pi)
-    return x, y, yaw
+    return RigidTransform(RotationMatrix.MakeZRotation(yaw), [x, y, z])
+
+
+def capture_world_points(plant, context, sensor, camera_pose: RigidTransform):
+    sensor_context = sensor.GetMyContextFromRoot(context)
+    depth_image = sensor.depth_image_32F_output_port().Eval(sensor_context)
+    depth = np.array(depth_image.data).squeeze(-1)
+    intrinsics = sensor.depth_camera_info()
+    fx, fy = intrinsics.focal_x(), intrinsics.focal_y()
+    cx, cy = intrinsics.center_x(), intrinsics.center_y()
+
+    v, u = np.mgrid[0 : depth.shape[0], 0 : depth.shape[1]]
+    valid = np.isfinite(depth) & (depth > 0)
+    x = (u - cx) * depth / fx
+    y = (v - cy) * depth / fy
+    points_cam = np.stack([x[valid], y[valid], depth[valid]], axis=-1)
+
+    R = camera_pose.rotation().matrix()
+    t = camera_pose.translation()
+    return points_cam @ R.T + t
+
+
+def estimate_brick_pose(points_world):
+    x, y, z = points_world[:, 0], points_world[:, 1], points_world[:, 2]
+    mask = (
+        (z > MIN_HEIGHT_ABOVE_TABLE)
+        & (z < MAX_HEIGHT_ABOVE_TABLE)
+        & (x > -ROBOT_OFFSET_X)
+        & (x < TABLE_LENGTH - ROBOT_OFFSET_X)
+        & (y > -ROBOT_OFFSET_Y)
+        & (y < TABLE_WIDTH - ROBOT_OFFSET_Y)
+        & (np.hypot(x, y) > BASE_EXCLUSION_RADIUS)
+    )
+    candidate = points_world[mask]
+    if candidate.shape[0] < 10:
+        return None
+
+    centroid = candidate.mean(axis=0)
+    xy = candidate[:, :2] - centroid[:2]
+    cov = xy.T @ xy
+    eigvals, eigvecs = np.linalg.eigh(cov)
+    principal = eigvecs[:, np.argmax(eigvals)]
+    yaw = np.arctan2(principal[1], principal[0])
+    return centroid[0], centroid[1], yaw
 
 
 def _solve_ik(kinematics: RobotKinematics, plant, arm_index, X_W_Base: RigidTransform, X_W_Target: RigidTransform, q_init):
@@ -94,81 +138,80 @@ def _solve_ik(kinematics: RobotKinematics, plant, arm_index, X_W_Base: RigidTran
 
 
 def run_pick_demo(meshcat: Meshcat, brick_urdf_path: Path, rng_seed=None) -> None:
-    (
-        robot_diagram,
-        context,
-        plant,
-        arm_index,
-        gripper_index,
-        brick_index,
-        arm_tcp_frame,
-        _scattered_brick_indices,
-    ) = build_arm_gripper_scene(
+    scene = build_arm_gripper_scene(
         meshcat,
         brick_urdf_path=brick_urdf_path,
         add_table=True,
-        scattered_brick_urdf_paths=SCATTERED_BRICK_URDFS,
+        add_camera=True,
         rng_seed=rng_seed,
     )
+    plant, context = scene.plant, scene.context
     plant_context = plant.GetMyContextFromRoot(context)
-    kinematics = RobotKinematics(robot_diagram, arm_index, meshcat=meshcat)
+    kinematics = RobotKinematics(scene.robot_diagram, scene.arm_index, meshcat=meshcat)
 
-    plant.SetPositions(plant_context, arm_index, HOME_CONFIGURATION)
-    set_gripper_opening(plant, plant_context, gripper_index, GRIPPER_OPEN)
-    X_W_Base = plant.GetFrameByName("base", arm_index).CalcPoseInWorld(plant_context)
-    robot_diagram.ForcedPublish(context)
+    plant.SetPositions(plant_context, scene.arm_index, OBSERVE_CONFIGURATION)
+    set_gripper_opening(plant, plant_context, scene.gripper_index, GRIPPER_OPEN)
+    X_W_Base = plant.GetFrameByName("base", scene.arm_index).CalcPoseInWorld(plant_context)
+    scene.robot_diagram.ForcedPublish(context)
     time.sleep(STEP_DELAY * 4)
 
     rng = np.random.default_rng(rng_seed)
-    brick_body = plant.GetBodyByName(_brick_body_name(plant, brick_index), brick_index)
+    brick_body = plant.GetBodyByName(_brick_body_name(plant, scene.brick_index), scene.brick_index)
+    ground_truth_z = resting_z_offset(brick_urdf_path)
 
     for attempt in range(MAX_SAMPLE_ATTEMPTS):
-        x, y, yaw = _sample_target_pose(rng)
-        X_W_Pregrasp = RigidTransform(GRASP_ROTATION, [x, y, GRASP_HEIGHT + PREGRASP_CLEARANCE])
-        X_W_Grasp = RigidTransform(GRASP_ROTATION, [x, y, GRASP_HEIGHT])
-        X_W_Lift = RigidTransform(GRASP_ROTATION, [x, y, GRASP_HEIGHT + LIFT_HEIGHT])
+        X_W_GroundTruth = _sample_ground_truth_pose(rng, ground_truth_z)
+        plant.SetFreeBodyPose(plant_context, brick_body, X_W_GroundTruth)
+        scene.robot_diagram.ForcedPublish(context)
+
+        points = capture_world_points(plant, context, scene.camera_sensor, scene.camera_pose)
+        estimate = estimate_brick_pose(points)
+        if estimate is None:
+            continue
+        x, y, yaw = estimate
+        grasp_rotation = RotationMatrix.MakeZRotation(yaw) @ GRASP_ROTATION_BASE
+        X_W_Pregrasp = RigidTransform(grasp_rotation, [x, y, PREGRASP_CLEARANCE])
+        X_W_Grasp = RigidTransform(grasp_rotation, [x, y, 0.0])
+        X_W_Lift = RigidTransform(grasp_rotation, [x, y, LIFT_HEIGHT])
         try:
-            q_pregrasp = _solve_ik(kinematics, plant, arm_index, X_W_Base, X_W_Pregrasp, HOME_CONFIGURATION)
-            q_grasp = _solve_ik(kinematics, plant, arm_index, X_W_Base, X_W_Grasp, q_pregrasp)
-            q_lift = _solve_ik(kinematics, plant, arm_index, X_W_Base, X_W_Lift, q_grasp)
+            q_pregrasp = _solve_ik(kinematics, plant, scene.arm_index, X_W_Base, X_W_Pregrasp, OBSERVE_CONFIGURATION)
+            q_grasp = _solve_ik(kinematics, plant, scene.arm_index, X_W_Base, X_W_Grasp, q_pregrasp)
+            q_lift = _solve_ik(kinematics, plant, scene.arm_index, X_W_Base, X_W_Lift, q_grasp)
             break
         except RuntimeError:
             continue
     else:
-        raise RuntimeError(f"Could not find a reachable brick pose after {MAX_SAMPLE_ATTEMPTS} attempts.")
+        raise RuntimeError(f"Could not perceive and reach a brick after {MAX_SAMPLE_ATTEMPTS} attempts.")
 
-    X_W_Brick = RigidTransform(RotationMatrix.MakeZRotation(yaw), [x, y, 0.0])
-    plant.SetFreeBodyPose(plant_context, brick_body, X_W_Brick)
-    robot_diagram.ForcedPublish(context)
-    time.sleep(STEP_DELAY * 4)
+    print(f"  Perceived brick at (x={x:.3f}, y={y:.3f}, yaw={yaw:.2f}) from RGBD camera")
 
-    print(f"  Reaching towards brick at (x={x:.3f}, y={y:.3f})...")
-    for q in _interpolate(HOME_CONFIGURATION, q_pregrasp, REACH_STEPS):
-        plant.SetPositions(plant_context, arm_index, q)
-        robot_diagram.ForcedPublish(context)
+    print("  Reaching towards the brick...")
+    for q in _interpolate(OBSERVE_CONFIGURATION, q_pregrasp, REACH_STEPS):
+        plant.SetPositions(plant_context, scene.arm_index, q)
+        scene.robot_diagram.ForcedPublish(context)
         time.sleep(STEP_DELAY)
 
     print("  Descending onto the brick...")
     for q in _interpolate(q_pregrasp, q_grasp, DESCEND_STEPS):
-        plant.SetPositions(plant_context, arm_index, q)
-        robot_diagram.ForcedPublish(context)
+        plant.SetPositions(plant_context, scene.arm_index, q)
+        scene.robot_diagram.ForcedPublish(context)
         time.sleep(STEP_DELAY)
 
     print("  Closing the gripper...")
     for angle in _interpolate(GRIPPER_OPEN, GRIPPER_CLOSED, GRIPPER_STEPS):
-        set_gripper_opening(plant, plant_context, gripper_index, angle)
-        robot_diagram.ForcedPublish(context)
+        set_gripper_opening(plant, plant_context, scene.gripper_index, angle)
+        scene.robot_diagram.ForcedPublish(context)
         time.sleep(STEP_DELAY)
 
-    X_W_Tcp_at_grasp = arm_tcp_frame.CalcPoseInWorld(plant_context)
+    X_W_Tcp_at_grasp = scene.arm_tcp_frame.CalcPoseInWorld(plant_context)
     X_Tcp_Brick = X_W_Tcp_at_grasp.inverse() @ plant.EvalBodyPoseInWorld(plant_context, brick_body)
 
     print(f"  Lifting {LIFT_HEIGHT * 100:.0f}cm straight up...")
     for q in _interpolate(q_grasp, q_lift, LIFT_STEPS):
-        plant.SetPositions(plant_context, arm_index, q)
-        X_W_Tcp = arm_tcp_frame.CalcPoseInWorld(plant_context)
+        plant.SetPositions(plant_context, scene.arm_index, q)
+        X_W_Tcp = scene.arm_tcp_frame.CalcPoseInWorld(plant_context)
         plant.SetFreeBodyPose(plant_context, brick_body, X_W_Tcp @ X_Tcp_Brick)
-        robot_diagram.ForcedPublish(context)
+        scene.robot_diagram.ForcedPublish(context)
         time.sleep(STEP_DELAY)
 
 

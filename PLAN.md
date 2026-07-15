@@ -20,7 +20,7 @@ Lego bricks sorted by shape or shape and color
 - Objective: Grasp a single lego brick from the pile
 
 - Interface
-    - Input: Lego brick pile RGBD
+    - Input: Lego brick pile RGBD camera frame
     - Output: TCP Pose, gripper action
 
 - Implementation
