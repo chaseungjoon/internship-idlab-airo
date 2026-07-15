@@ -39,3 +39,20 @@ Lego bricks sorted by shape or shape and color
 ### Module 4
 
 - Objective: Wire Module 1~3 and add termination checking
+
+
+# Task Scope
+
+# Actions
+
+# Data
+
+# Compute
+
+# Performance metrics
+
+# Success criteria & failure modes
+
+# Usage of software architecture
+
+# Use-cases & behaviors
