@@ -15,28 +15,39 @@ Lego bricks sorted by shape or shape and color
 
 ## Modules
 
-### Module 1
+### Module 1 (On-site)
 
 - Objective: Grasp a single lego brick from the pile
-- Implementation
-    - Physical
-    - Simulation
 
-### Module 2
+- Interface
+    - Input: Lego brick pile RGBD
+    - Output: TCP Pose, gripper action
+
+- Implementation
+    - Submodule 0: Grasp single standalone block 
+    - Submodule 1: Grasp a specific block from the pile
+    - Submodule 2: Identify which block to grasp from the pile
+
+### Module 2 (Remote)
 
 - Objective: Identify grasped lego brick
-- Implementation
-    - Physical
-    - Simulation
 
-### Module 3
+- Interface
+    - Input: Camera frame(s), grasp pose
+    - Output: brick_id, orientation
+
+- Implementation
+    - Submodule 0: Identify brick orientation
+    - Submodule 1: Identify brick_id from database
+
+### Module 3 (Remote)
 
 - Objective: Sort identified lego brick into a category
 - Implementation
     - Physical
     - Simulation
 
-### Module 4
+### Module 4 (On-site)
 
 - Objective: Wire Module 1~3 and add termination checking
 
