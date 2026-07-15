@@ -1,5 +1,6 @@
 .DS_Store
 src/data/
+src/assets/normals_cache/
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
