@@ -11,8 +11,7 @@
 
 # Quickstart
 
-- Prerequisites
-    python3.10.*, conda, UR3e
+- Prerequisites: python3.10.*, conda, UR3e
 
 - Install
 
@@ -27,11 +26,18 @@ cd internship-idlab-airo
 conda env create -f src/environment.yaml    #linux
 conda env create -f src/environment-macos.yaml    #macos
 ```
+```bash
+conda activate irm
+```
 
 - Run simulation
 
 ```bash
-conda activate irm
+python3 src/M1/simulation/submodule_0.py
+```
 
-python3 src/M1/submodule_0.py
+- Run physical
+
+```bash
+jupyter notebook src/M1/physical/submodule_0.ipynb
 ```
