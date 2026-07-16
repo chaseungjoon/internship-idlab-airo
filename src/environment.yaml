@@ -1,11 +1,6 @@
-# Linux conda environment - exact match of materials/environment.yaml (the
-# professor's setup). Use this on the lab / robot-connected Linux machine.
-# It supports MVP items 1, 2 and 3 (sim, wrist rotation+render, and the real
-# UR3 + RealSense camera for frame capture).
-#
 #   conda env create -f src/environment.yaml
-#   conda activate irm
-name: irm
+#   conda activate int2026
+name: int2026
 channels:
   - conda-forge
   - defaults

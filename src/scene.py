@@ -20,9 +20,13 @@ from pydrake.geometry import (
     Role,
 )
 from pydrake.math import RigidTransform, RotationMatrix
+from pydrake.multibody.plant import CoulombFriction, DiscreteContactApproximation
 from pydrake.multibody.tree import FixedOffsetFrame
 from pydrake.planning import RobotDiagramBuilder
+from pydrake.systems.framework import LeafSystem
+from pydrake.systems.primitives import ConstantVectorSource
 from pydrake.systems.sensors import CameraInfo, RgbdSensor
+from pydrake.visualization import ApplyVisualizationConfig, VisualizationConfig
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_BRICK_URDF = REPO_ROOT / "lego_3d" / "urdf" / "3005__light_bluish_gray.urdf"
@@ -146,12 +150,46 @@ REVO2_MIMIC_JOINTS = {
 GRIPPER_OPEN = 0.0
 GRIPPER_CLOSED = 1.0
 
+ARM_JOINT_EFFORTS = {
+    "joint_1": 60.0,
+    "joint_2": 60.0,
+    "joint_3": 30.0,
+    "joint_4": 10.0,
+    "joint_5": 10.0,
+    "joint_6": 10.0,
+}
+ARM_PD_GAINS = {
+    "joint_1": (400.0, 40.0),
+    "joint_2": (400.0, 40.0),
+    "joint_3": (300.0, 30.0),
+    "joint_4": (100.0, 10.0),
+    "joint_5": (100.0, 10.0),
+    "joint_6": (50.0, 5.0),
+}
+REVO2_JOINT_EFFORTS = {
+    "right_thumb_metacarpal_joint": 0.5,
+    "right_thumb_proximal_joint": 1.1,
+    "right_index_proximal_joint": 2.0,
+    "right_middle_proximal_joint": 2.0,
+    "right_ring_proximal_joint": 2.0,
+    "right_pinky_proximal_joint": 2.0,
+}
+REVO2_PD_GAINS = {
+    "right_thumb_metacarpal_joint": (5.0, 0.3),
+    "right_thumb_proximal_joint": (5.0, 0.3),
+    "right_index_proximal_joint": (5.0, 0.3),
+    "right_middle_proximal_joint": (5.0, 0.3),
+    "right_ring_proximal_joint": (5.0, 0.3),
+    "right_pinky_proximal_joint": (5.0, 0.3),
+}
+
 TABLE_LENGTH = 0.80
 TABLE_WIDTH = 0.60
 TABLE_THICKNESS = 0.03
 ROBOT_OFFSET_X = 0.09
 ROBOT_OFFSET_Y = 0.07
 TABLE_COLOR = np.array([0.55, 0.38, 0.20, 1.0])
+TABLE_FRICTION = CoulombFriction(static_friction=0.9, dynamic_friction=0.8)
 
 TABLE_CENTER_X = TABLE_LENGTH / 2 - ROBOT_OFFSET_X
 TABLE_CENTER_Y = TABLE_WIDTH / 2 - ROBOT_OFFSET_Y
@@ -176,6 +214,8 @@ class ArmGripperScene:
     scattered_brick_indices: list = field(default_factory=list)
     camera_sensor: Optional[RgbdSensor] = None
     arm_camera_frame: object = None
+    arm_setpoint_source: object = None
+    gripper_setpoint_source: object = None
 
 
 def add_meshcat_visualizer(robot_diagram_builder: RobotDiagramBuilder, meshcat: Meshcat = None) -> Meshcat:
@@ -193,9 +233,59 @@ def add_meshcat_visualizer(robot_diagram_builder: RobotDiagramBuilder, meshcat: 
 
 def _add_table(plant) -> None:
     X_W_Table = RigidTransform(RotationMatrix.Identity(), [TABLE_CENTER_X, TABLE_CENTER_Y, -TABLE_THICKNESS / 2])
-    plant.RegisterVisualGeometry(
-        plant.world_body(), X_W_Table, Box(TABLE_LENGTH, TABLE_WIDTH, TABLE_THICKNESS), "table", TABLE_COLOR
-    )
+    table_box = Box(TABLE_LENGTH, TABLE_WIDTH, TABLE_THICKNESS)
+    plant.RegisterVisualGeometry(plant.world_body(), X_W_Table, table_box, "table", TABLE_COLOR)
+    plant.RegisterCollisionGeometry(plant.world_body(), X_W_Table, table_box, "table_collision", TABLE_FRICTION)
+
+
+def _add_actuators(plant, arm_index, gripper_index) -> None:
+    for joint_name, effort in ARM_JOINT_EFFORTS.items():
+        joint = plant.GetJointByName(joint_name, arm_index)
+        plant.AddJointActuator(f"{joint_name}_actuator", joint, effort)
+    for joint_name, effort in REVO2_JOINT_EFFORTS.items():
+        joint = plant.GetJointByName(joint_name, gripper_index)
+        plant.AddJointActuator(f"{joint_name}_actuator", joint, effort)
+
+
+class _PdGravityCompensationController(LeafSystem):
+    def __init__(self, plant, joint_names, model_instance, pd_gains):
+        super().__init__()
+        self._plant = plant
+        self._scratch_context = plant.CreateDefaultContext()
+        self._joints = [plant.GetJointByName(name, model_instance) for name in joint_names]
+        self._gains = [pd_gains[name] for name in joint_names]
+
+        num_q = plant.num_positions()
+        num_v = plant.num_velocities()
+        self.DeclareVectorInputPort("plant_state", num_q + num_v)
+        self.DeclareVectorInputPort("desired_position", len(self._joints))
+        self.DeclareVectorOutputPort("actuation", len(self._joints), self._calc_actuation)
+
+    def _calc_actuation(self, context, output):
+        state = self.get_input_port(0).Eval(context)
+        q_desired = self.get_input_port(1).Eval(context)
+        num_q = self._plant.num_positions()
+        q, v = state[:num_q], state[num_q:]
+
+        self._plant.SetPositions(self._scratch_context, q)
+        self._plant.SetVelocities(self._scratch_context, v)
+        tau_gravity = self._plant.CalcGravityGeneralizedForces(self._scratch_context)
+
+        tau = np.empty(len(self._joints))
+        for i, (joint, (kp, kd)) in enumerate(zip(self._joints, self._gains)):
+            q_i = q[joint.position_start()]
+            v_i = v[joint.velocity_start()]
+            tau[i] = kp * (q_desired[i] - q_i) - kd * v_i - tau_gravity[joint.velocity_start()]
+        output.SetFromVector(tau)
+
+
+def _add_pd_controller(builder, plant, joint_names, model_instance, pd_gains):
+    controller = builder.AddSystem(_PdGravityCompensationController(plant, joint_names, model_instance, pd_gains))
+    setpoint_source = builder.AddSystem(ConstantVectorSource(np.zeros(len(joint_names))))
+    builder.Connect(plant.get_state_output_port(), controller.get_input_port(0))
+    builder.Connect(setpoint_source.get_output_port(), controller.get_input_port(1))
+    builder.Connect(controller.get_output_port(), plant.get_actuation_input_port(model_instance))
+    return setpoint_source
 
 
 def _sample_table_pose(
@@ -242,9 +332,11 @@ def build_arm_gripper_scene(
     scattered_brick_urdf_paths: Optional[List[Path]] = None,
     rng_seed: Optional[int] = None,
     add_camera: bool = False,
+    add_controllers: bool = False,
 ) -> ArmGripperScene:
     robot_diagram_builder = RobotDiagramBuilder()
     plant = robot_diagram_builder.plant()
+    plant.set_discrete_contact_approximation(DiscreteContactApproximation.kSap)
     parser = robot_diagram_builder.parser()
     parser.SetAutoRenaming(True)
 
@@ -281,7 +373,26 @@ def build_arm_gripper_scene(
     if add_table:
         _add_table(plant)
 
-    robot_diagram, context = finish_build(robot_diagram_builder, meshcat)
+    _add_actuators(plant, arm_index, gripper_index)
+
+    arm_setpoint_source = None
+    gripper_setpoint_source = None
+    if add_controllers:
+        builder = robot_diagram_builder.builder()
+        plant.Finalize()
+        config = VisualizationConfig(publish_contacts=True, enable_alpha_sliders=True)
+        ApplyVisualizationConfig(config, builder=builder, plant=plant, meshcat=meshcat)
+        arm_setpoint_source = _add_pd_controller(
+            builder, plant, list(ARM_PD_GAINS.keys()), arm_index, ARM_PD_GAINS
+        )
+        gripper_setpoint_source = _add_pd_controller(
+            builder, plant, list(REVO2_PD_GAINS.keys()), gripper_index, REVO2_PD_GAINS
+        )
+        robot_diagram = robot_diagram_builder.Build()
+        context = robot_diagram.CreateDefaultContext()
+        robot_diagram.ForcedPublish(context)
+    else:
+        robot_diagram, context = finish_build(robot_diagram_builder, meshcat)
 
     if scattered_brick_indices:
         plant_context = plant.GetMyContextFromRoot(context)
@@ -303,6 +414,8 @@ def build_arm_gripper_scene(
         scattered_brick_indices=scattered_brick_indices,
         camera_sensor=camera_sensor,
         arm_camera_frame=arm_camera_frame if add_camera else None,
+        arm_setpoint_source=arm_setpoint_source,
+        gripper_setpoint_source=gripper_setpoint_source,
     )
 
 
