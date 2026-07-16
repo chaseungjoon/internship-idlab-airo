@@ -14,7 +14,8 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
-    </link>
+    <collision><geometry><mesh filename="../meshes/base_link.obj" />
+      </geometry></collision></link>
   <link name="link_1">
     <inertial>
       <origin xyz="0.000941 0.007803 -0.10744" rpy="0 0 0" />
@@ -30,7 +31,8 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
-    </link>
+    <collision><geometry><mesh filename="../meshes/link_1.obj" />
+      </geometry></collision></link>
   <joint name="joint_1" type="revolute">
     <origin xyz="0 0 0.2405" rpy="0 0 0" />
     <parent link="base_link" />
@@ -53,7 +55,8 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
-    </link>
+    <collision><geometry><mesh filename="../meshes/link_2.obj" />
+      </geometry></collision></link>
   <joint name="joint_2" type="revolute">
     <origin xyz="0 0 0" rpy="1.5708 -1.5708 0" />
     <parent link="link_1" />
@@ -76,7 +79,8 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
-    </link>
+    <collision><geometry><mesh filename="../meshes/link_3.obj" />
+      </geometry></collision></link>
   <joint name="joint_3" type="revolute">
     <origin xyz="0.256 0 0" rpy="0 0 1.5708" />
     <parent link="link_2" />
@@ -99,7 +103,8 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
-    </link>
+    <collision><geometry><mesh filename="../meshes/link_4.obj" />
+      </geometry></collision></link>
   <joint name="joint_4" type="revolute">
     <origin xyz="0 -0.21 0" rpy="1.5708 0 0" />
     <parent link="link_3" />
@@ -122,7 +127,8 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
-    </link>
+    <collision><geometry><mesh filename="../meshes/link_5.obj" />
+      </geometry></collision></link>
   <joint name="joint_5" type="revolute">
     <origin xyz="0 0 0" rpy="-1.5708 0 0" />
     <parent link="link_4" />
@@ -145,7 +151,8 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
-    </link>
+    <collision><geometry><mesh filename="../meshes/link_6.obj" />
+      </geometry></collision></link>
   <joint name="joint_6" type="revolute">
     <origin xyz="0 -0.144 0" rpy="1.5708 0 0" />
     <parent link="link_5" />
