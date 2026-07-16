@@ -3,7 +3,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
 
-import airo_models
 import numpy as np
 from airo_drake import finish_build
 from pydrake.geometry import (
@@ -27,7 +26,8 @@ from pydrake.systems.sensors import CameraInfo, RgbdSensor
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_BRICK_URDF = REPO_ROOT / "lego_3d" / "urdf" / "3005__light_bluish_gray.urdf"
-GRIPPER_URDF = REPO_ROOT / "src" / "assets" / "robotiq_2f_85" / "urdf" / "robotiq_2f_85.urdf"
+ARM_URDF = REPO_ROOT / "src" / "assets" / "rm65" / "urdf" / "rm65.urdf"
+GRIPPER_URDF = REPO_ROOT / "src" / "assets" / "revo2" / "urdf" / "revo2_right_hand.urdf"
 NORMALS_CACHE_DIR = REPO_ROOT / "src" / "assets" / "normals_cache"
 
 
@@ -126,18 +126,25 @@ def resting_z_offset(urdf_path: Path) -> float:
     return -_mesh_z_min(mesh_path) * scale_z
 
 
-TCP_OFFSET = 0.174
+TCP_OFFSET = RigidTransform(RotationMatrix.Identity(), [0.033, 0.019, 0.074])
 
-GRIPPER_MIMIC_SIGNS = {
-    "finger_joint": 1,
-    "left_inner_knuckle_joint": 1,
-    "left_inner_finger_joint": -1,
-    "right_outer_knuckle_joint": 1,
-    "right_inner_knuckle_joint": 1,
-    "right_inner_finger_joint": -1,
+REVO2_FINGER_JOINTS = {
+    "right_thumb_metacarpal_joint": 0.9,
+    "right_thumb_proximal_joint": 1.0,
+    "right_index_proximal_joint": 1.2,
+    "right_middle_proximal_joint": 1.2,
+    "right_ring_proximal_joint": 1.2,
+    "right_pinky_proximal_joint": 1.2,
+}
+REVO2_MIMIC_JOINTS = {
+    "right_thumb_distal_joint": ("right_thumb_proximal_joint", 1.0),
+    "right_index_distal_joint": ("right_index_proximal_joint", 1.155),
+    "right_middle_distal_joint": ("right_middle_proximal_joint", 1.155),
+    "right_ring_distal_joint": ("right_ring_proximal_joint", 1.155),
+    "right_pinky_distal_joint": ("right_pinky_proximal_joint", 1.155),
 }
 GRIPPER_OPEN = 0.0
-GRIPPER_CLOSED = 0.68
+GRIPPER_CLOSED = 1.0
 
 TABLE_LENGTH = 0.80
 TABLE_WIDTH = 0.60
@@ -219,11 +226,11 @@ def _add_wrist_camera(robot_diagram_builder: RobotDiagramBuilder, plant, arm_ind
         RenderCameraCore(CAMERA_RENDERER_NAME, intrinsics, clipping, RigidTransform()), DepthRange(0.05, 3.0)
     )
 
-    tool0_body = plant.GetBodyByName("tool0", arm_index)
-    tool0_frame_id = plant.GetBodyFrameIdOrThrow(tool0_body.index())
+    flange_body = plant.GetBodyByName("link_6", arm_index)
+    flange_frame_id = plant.GetBodyFrameIdOrThrow(flange_body.index())
 
     builder = robot_diagram_builder.builder()
-    sensor = builder.AddSystem(RgbdSensor(tool0_frame_id, CAMERA_TOOL0_OFFSET, color_camera, depth_camera))
+    sensor = builder.AddSystem(RgbdSensor(flange_frame_id, CAMERA_TOOL0_OFFSET, color_camera, depth_camera))
     builder.Connect(scene_graph.get_query_output_port(), sensor.query_object_input_port())
     return sensor
 
@@ -245,14 +252,12 @@ def build_arm_gripper_scene(
     meshcat.DeleteAddedControls()
     add_meshcat_visualizer(robot_diagram_builder, meshcat)
 
-    arm_urdf_path = airo_models.get_urdf_path("ur3e")
-
     resolved_brick_urdf = ensure_renderable_urdf(brick_urdf_path) if add_camera else Path(brick_urdf_path).resolve()
     resolved_scattered_urdfs = [
         ensure_renderable_urdf(p) if add_camera else Path(p).resolve() for p in (scattered_brick_urdf_paths or [])
     ]
 
-    arm_index = parser.AddModels(arm_urdf_path)[0]
+    arm_index = parser.AddModels(str(ARM_URDF))[0]
     gripper_index = parser.AddModels(str(GRIPPER_URDF))[0]
     brick_index = parser.AddModels(str(resolved_brick_urdf))[0]
 
@@ -262,15 +267,15 @@ def build_arm_gripper_scene(
 
     world_frame = plant.world_frame()
     arm_frame = plant.GetFrameByName("base_link", arm_index)
-    arm_tool_frame = plant.GetFrameByName("tool0", arm_index)
-    gripper_frame = plant.GetFrameByName("base_link", gripper_index)
+    arm_tool_frame = plant.GetFrameByName("link_6", arm_index)
+    gripper_frame = plant.GetFrameByName("right_base_link", gripper_index)
 
     X_W_ArmBase = RigidTransform(RotationMatrix.MakeZRotation(ROBOT_BASE_YAW)) if add_table else RigidTransform()
     plant.WeldFrames(world_frame, arm_frame, X_W_ArmBase)
     plant.WeldFrames(arm_tool_frame, gripper_frame)
 
-    X_Tool0Tcp = RigidTransform(RotationMatrix.Identity(), [0, 0, TCP_OFFSET])
-    arm_tcp_frame = plant.AddFrame(FixedOffsetFrame("tcp", arm_tool_frame, X_Tool0Tcp))
+    plant.AddFrame(FixedOffsetFrame("base", arm_frame, RigidTransform()))
+    arm_tcp_frame = plant.AddFrame(FixedOffsetFrame("tcp", arm_tool_frame, TCP_OFFSET))
     arm_camera_frame = plant.AddFrame(FixedOffsetFrame("camera", arm_tool_frame, CAMERA_TOOL0_OFFSET))
 
     if add_table:
@@ -301,7 +306,10 @@ def build_arm_gripper_scene(
     )
 
 
-def set_gripper_opening(plant, plant_context, gripper_index, angle: float) -> None:
-    for joint_name, sign in GRIPPER_MIMIC_SIGNS.items():
+def set_gripper_opening(plant, plant_context, gripper_index, closure: float) -> None:
+    for joint_name, closed_angle in REVO2_FINGER_JOINTS.items():
         joint = plant.GetJointByName(joint_name, gripper_index)
-        joint.set_angle(plant_context, sign * angle)
+        joint.set_angle(plant_context, closure * closed_angle)
+    for joint_name, (source_name, multiplier) in REVO2_MIMIC_JOINTS.items():
+        joint = plant.GetJointByName(joint_name, gripper_index)
+        joint.set_angle(plant_context, closure * REVO2_FINGER_JOINTS[source_name] * multiplier)

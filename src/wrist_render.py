@@ -1,4 +1,4 @@
-"""MVP item 2: rotate the UR3e wrist through a few configurations, publish
+"""MVP item 2: rotate the RM65 wrist through a few configurations, publish
 each to Meshcat, and render an RGB frame from a fixed simulated camera at
 each step. Frames are saved to src/data/pretrain_frames/ as a tiny image
 dataset stub for later perception pretraining.
@@ -22,15 +22,14 @@ from pydrake.geometry import (
 from pydrake.math import RigidTransform, RollPitchYaw
 from pydrake.systems.sensors import CameraInfo, RgbdSensor
 
-from scene import add_meshcat_visualizer
-import airo_models
+from scene import ARM_URDF, add_meshcat_visualizer
 from airo_drake import finish_build
 from pydrake.planning import RobotDiagramBuilder
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FRAMES_DIR = Path(__file__).resolve().parent / "data" / "pretrain_frames"
 
-# Wrist joint (wrist_3_joint, the 6th/last UR joint) sweep, in radians.
+# Wrist joint (joint_6, the 6th/last RM65 joint) sweep, in radians.
 WRIST_ANGLES = np.linspace(-np.pi / 2, np.pi / 2, 5)
 
 BASE_ARM_CONFIGURATION = np.array([np.pi / 2, -np.pi / 2, np.pi / 2, -np.pi / 2, -np.pi / 2, 0])
@@ -59,13 +58,11 @@ def _add_fixed_camera(robot_diagram_builder: RobotDiagramBuilder, renderer_name:
 
 
 def build_scene_with_camera(meshcat: Meshcat):
-    """UR3e-only scene (no gripper) plus a fixed RGB-D camera.
+    """RM65-only scene (no hand) plus a fixed RGB-D camera.
 
-    The Robotiq 2F-85 visual meshes have no vertex normals, which Meshcat
-    tolerates but Drake's VTK render engine (used for the camera) rejects
-    with "OBJ has no normals". The wrist-rotation render demo only needs the
-    arm, so the gripper is left out here (it's still used in grab_demo.py,
-    which only visualizes through Meshcat and never renders it).
+    The wrist-rotation render demo only needs the arm, so the hand is left
+    out here (it's still used in grab_demo.py, which only visualizes through
+    Meshcat and never renders it).
     """
     robot_diagram_builder = RobotDiagramBuilder()
     plant = robot_diagram_builder.plant()
@@ -77,7 +74,7 @@ def build_scene_with_camera(meshcat: Meshcat):
     add_meshcat_visualizer(robot_diagram_builder, meshcat)
     sensor = _add_fixed_camera(robot_diagram_builder)
 
-    arm_index = parser.AddModels(airo_models.get_urdf_path("ur3e"))[0]
+    arm_index = parser.AddModels(str(ARM_URDF))[0]
     plant.WeldFrames(plant.world_frame(), plant.GetFrameByName("base_link", arm_index))
 
     robot_diagram, context = finish_build(robot_diagram_builder, meshcat)

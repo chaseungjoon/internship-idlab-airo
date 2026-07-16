@@ -1,6 +1,6 @@
-"""MVP item 1: load the UR3e + Robotiq 2F-85 URDFs into Drake, place a lego
-brick at the gripper's TCP, and kinematically animate the gripper closing
-around it, visualized live in Meshcat.
+"""MVP item 1: load the RM65 + BrainCo Revo2 URDFs into Drake, place a lego
+brick at the hand's TCP, and kinematically animate the hand closing around
+it, visualized live in Meshcat.
 
 This is a kinematic demo (SetPositions + ForcedPublish), not a contact-rich
 dynamics simulation -- the same style used in materials/practical_2.ipynb and
@@ -17,7 +17,7 @@ from pydrake.math import RigidTransform, RotationMatrix
 
 from scene import DEFAULT_BRICK_URDF, GRIPPER_CLOSED, GRIPPER_OPEN, build_arm_gripper_scene, set_gripper_opening
 
-# An arbitrary, non-degenerate UR3e joint configuration (radians) to pose the
+# An arbitrary, non-degenerate RM65 joint configuration (radians) to pose the
 # arm for the demo. Not calibrated to any physical mounting -- MVP item 1 only
 # needs a working sim pipeline, not a real workspace layout.
 DEMO_ARM_CONFIGURATION = np.array([np.pi / 2, -np.pi / 2, np.pi / 2, -np.pi / 2, -np.pi / 2, 0])

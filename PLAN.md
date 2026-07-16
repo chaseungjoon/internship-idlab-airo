@@ -7,7 +7,9 @@ From a pile of lego bricks, grab, identify and sort each brick (by shape / shape
 ## Background
 
 - Pile of unsorted lego bricks (manifest: lego_list.csv)
-- UR3e with grippers and RGBD camera
+- Realman arm
+- BrainCo Bionic Dexterous Hand (BC-Revo-2)
+- Realsense RGBD camera
 
 ## Outcome
 
