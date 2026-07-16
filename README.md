@@ -9,6 +9,8 @@
 
 * Learn robot manipulation and imitation learning utilizing robot hand and lego bricks
 
+[PLAN.md](PLAN.md)
+
 # Quickstart
 
 - Prerequisites: python3.10.*, conda, UR3e
