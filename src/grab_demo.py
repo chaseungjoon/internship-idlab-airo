@@ -1,12 +1,3 @@
-"""MVP item 1: load the RM65 + BrainCo Revo2 URDFs into Drake, place a lego
-brick at the hand's TCP, and kinematically animate the hand closing around
-it, visualized live in Meshcat.
-
-This is a kinematic demo (SetPositions + ForcedPublish), not a contact-rich
-dynamics simulation -- the same style used in materials/practical_2.ipynb and
-materials/homework_3_modeling_environments for scripted visualization.
-"""
-
 import time
 from pathlib import Path
 from typing import List, Optional
