@@ -13,7 +13,7 @@
 
 # Quickstart
 
-- Prerequisites: python3.10.*, conda, UR3e
+- Prerequisites: python3.10.* & conda
 
 - Install
 
