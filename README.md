@@ -2,12 +2,12 @@
 
 * Bachelor's Internship @ IDLab-AIRO, UGent
 * Timeline: 1JUL26-26AUG26
-* Robot ip: 10.42.0.162
-* Robot type: Universal Robots UR3e
+* Robot type: Realman
+* Hand type: BrainCo Revo2
 
 # Objective
 
-* Learn robot manipulation and imitation learning utilizing UR3 and lego bricks
+* Learn robot manipulation and imitation learning utilizing robot hand and lego bricks
 
 # Quickstart
 
@@ -27,7 +27,7 @@ conda env create -f src/environment.yaml    #linux
 conda env create -f src/environment-macos.yaml    #macos
 ```
 ```bash
-conda activate irm
+conda activate int2026
 ```
 
 - Run simulation
