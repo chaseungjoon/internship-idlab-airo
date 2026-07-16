@@ -85,8 +85,7 @@ def _observe_tcp_pose() -> RigidTransform:
     )
     R_camera = _look_at_rotation(eye, OBSERVE_TARGET)
     X_W_Camera = RigidTransform(RotationMatrix(R_camera), eye)
-    X_Tool0_Tcp = RigidTransform(RotationMatrix.Identity(), [0, 0, TCP_OFFSET])
-    X_Tcp_Camera = X_Tool0_Tcp.inverse() @ CAMERA_TOOL0_OFFSET
+    X_Tcp_Camera = TCP_OFFSET.inverse() @ CAMERA_TOOL0_OFFSET
     return X_W_Camera @ X_Tcp_Camera.inverse()
 
 

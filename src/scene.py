@@ -8,6 +8,7 @@ from airo_drake import finish_build
 from pydrake.geometry import (
     Box,
     ClippingRange,
+    CollisionFilterDeclaration,
     ColorRenderCamera,
     DepthRange,
     DepthRenderCamera,
@@ -279,6 +280,16 @@ class _PdGravityCompensationController(LeafSystem):
         output.SetFromVector(tau)
 
 
+def _filter_robot_self_collisions(scene_graph, plant, arm_index, gripper_index) -> None:
+    robot_bodies = [
+        plant.get_body(body_index)
+        for model_instance in (arm_index, gripper_index)
+        for body_index in plant.GetBodyIndices(model_instance)
+    ]
+    geometry_set = plant.CollectRegisteredGeometries(robot_bodies)
+    scene_graph.collision_filter_manager().Apply(CollisionFilterDeclaration().ExcludeWithin(geometry_set))
+
+
 def _add_pd_controller(builder, plant, joint_names, model_instance, pd_gains):
     controller = builder.AddSystem(_PdGravityCompensationController(plant, joint_names, model_instance, pd_gains))
     setpoint_source = builder.AddSystem(ConstantVectorSource(np.zeros(len(joint_names))))
@@ -380,6 +391,7 @@ def build_arm_gripper_scene(
     if add_controllers:
         builder = robot_diagram_builder.builder()
         plant.Finalize()
+        _filter_robot_self_collisions(robot_diagram_builder.scene_graph(), plant, arm_index, gripper_index)
         config = VisualizationConfig(publish_contacts=True, enable_alpha_sliders=True)
         ApplyVisualizationConfig(config, builder=builder, plant=plant, meshcat=meshcat)
         arm_setpoint_source = _add_pd_controller(
