@@ -21,11 +21,12 @@ from pydrake.geometry import (
     Role,
 )
 from pydrake.math import RigidTransform, RotationMatrix
-from pydrake.multibody.plant import CoulombFriction, DiscreteContactApproximation
+from pydrake.multibody.parsing import Parser
+from pydrake.multibody.plant import CoulombFriction, DiscreteContactApproximation, MultibodyPlant
 from pydrake.multibody.tree import FixedOffsetFrame
 from pydrake.planning import RobotDiagramBuilder
-from pydrake.systems.framework import LeafSystem
-from pydrake.systems.primitives import ConstantVectorSource
+from pydrake.systems.controllers import InverseDynamicsController
+from pydrake.systems.primitives import ConstantVectorSource, MatrixGain
 from pydrake.systems.sensors import CameraInfo, RgbdSensor
 from pydrake.visualization import ApplyVisualizationConfig, VisualizationConfig
 
@@ -162,10 +163,10 @@ ARM_JOINT_EFFORTS = {
 ARM_PD_GAINS = {
     "joint_1": (400.0, 40.0),
     "joint_2": (400.0, 40.0),
-    "joint_3": (300.0, 30.0),
-    "joint_4": (100.0, 10.0),
-    "joint_5": (100.0, 10.0),
-    "joint_6": (50.0, 5.0),
+    "joint_3": (400.0, 40.0),
+    "joint_4": (400.0, 40.0),
+    "joint_5": (400.0, 40.0),
+    "joint_6": (400.0, 40.0),
 }
 REVO2_JOINT_EFFORTS = {
     "right_thumb_metacarpal_joint": 0.5,
@@ -176,12 +177,12 @@ REVO2_JOINT_EFFORTS = {
     "right_pinky_proximal_joint": 2.0,
 }
 REVO2_PD_GAINS = {
-    "right_thumb_metacarpal_joint": (5.0, 0.3),
-    "right_thumb_proximal_joint": (5.0, 0.3),
-    "right_index_proximal_joint": (5.0, 0.3),
-    "right_middle_proximal_joint": (5.0, 0.3),
-    "right_ring_proximal_joint": (5.0, 0.3),
-    "right_pinky_proximal_joint": (5.0, 0.3),
+    "right_thumb_metacarpal_joint": (20.0, 1.0),
+    "right_thumb_proximal_joint": (20.0, 1.0),
+    "right_index_proximal_joint": (20.0, 1.0),
+    "right_middle_proximal_joint": (20.0, 1.0),
+    "right_ring_proximal_joint": (20.0, 1.0),
+    "right_pinky_proximal_joint": (20.0, 1.0),
 }
 
 TABLE_LENGTH = 0.80
@@ -248,38 +249,6 @@ def _add_actuators(plant, arm_index, gripper_index) -> None:
         plant.AddJointActuator(f"{joint_name}_actuator", joint, effort)
 
 
-class _PdGravityCompensationController(LeafSystem):
-    def __init__(self, plant, joint_names, model_instance, pd_gains):
-        super().__init__()
-        self._plant = plant
-        self._scratch_context = plant.CreateDefaultContext()
-        self._joints = [plant.GetJointByName(name, model_instance) for name in joint_names]
-        self._gains = [pd_gains[name] for name in joint_names]
-
-        num_q = plant.num_positions()
-        num_v = plant.num_velocities()
-        self.DeclareVectorInputPort("plant_state", num_q + num_v)
-        self.DeclareVectorInputPort("desired_position", len(self._joints))
-        self.DeclareVectorOutputPort("actuation", len(self._joints), self._calc_actuation)
-
-    def _calc_actuation(self, context, output):
-        state = self.get_input_port(0).Eval(context)
-        q_desired = self.get_input_port(1).Eval(context)
-        num_q = self._plant.num_positions()
-        q, v = state[:num_q], state[num_q:]
-
-        self._plant.SetPositions(self._scratch_context, q)
-        self._plant.SetVelocities(self._scratch_context, v)
-        tau_gravity = self._plant.CalcGravityGeneralizedForces(self._scratch_context)
-
-        tau = np.empty(len(self._joints))
-        for i, (joint, (kp, kd)) in enumerate(zip(self._joints, self._gains)):
-            q_i = q[joint.position_start()]
-            v_i = v[joint.velocity_start()]
-            tau[i] = kp * (q_desired[i] - q_i) - kd * v_i - tau_gravity[joint.velocity_start()]
-        output.SetFromVector(tau)
-
-
 def _filter_robot_self_collisions(scene_graph, plant, arm_index, gripper_index) -> None:
     robot_bodies = [
         plant.get_body(body_index)
@@ -290,12 +259,64 @@ def _filter_robot_self_collisions(scene_graph, plant, arm_index, gripper_index) 
     scene_graph.collision_filter_manager().Apply(CollisionFilterDeclaration().ExcludeWithin(geometry_set))
 
 
-def _add_pd_controller(builder, plant, joint_names, model_instance, pd_gains):
-    controller = builder.AddSystem(_PdGravityCompensationController(plant, joint_names, model_instance, pd_gains))
-    setpoint_source = builder.AddSystem(ConstantVectorSource(np.zeros(len(joint_names))))
-    builder.Connect(plant.get_state_output_port(), controller.get_input_port(0))
-    builder.Connect(setpoint_source.get_output_port(), controller.get_input_port(1))
-    builder.Connect(controller.get_output_port(), plant.get_actuation_input_port(model_instance))
+def _strip_geometry(root: ET.Element) -> None:
+    for link in root.findall("link"):
+        for tag in ("visual", "collision"):
+            for element in link.findall(tag):
+                link.remove(element)
+
+
+def _make_controller_urdf(urdf_path: Path, base_link_name: str, fixed_joint_names, cache_name: str) -> Path:
+    urdf_path = Path(urdf_path).resolve()
+    tree = ET.parse(urdf_path)
+    root = tree.getroot()
+
+    _strip_geometry(root)
+    for joint in root.findall("joint"):
+        if joint.get("name") in fixed_joint_names:
+            joint.set("type", "fixed")
+            for tag in ("mimic", "limit"):
+                element = joint.find(tag)
+                if element is not None:
+                    joint.remove(element)
+
+    NORMALS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    out_path = NORMALS_CACHE_DIR / cache_name
+    tree.write(out_path)
+    return out_path
+
+
+def _build_controller_plant(urdf_path: Path, base_link_name: str, joint_efforts, fixed_joint_names=()) -> MultibodyPlant:
+    controller_urdf = _make_controller_urdf(urdf_path, base_link_name, fixed_joint_names, f"controller_{urdf_path.name}")
+    controller_plant = MultibodyPlant(time_step=0.0)
+    parser = Parser(controller_plant)
+    parser.SetAutoRenaming(True)
+    model_instance = parser.AddModels(str(controller_urdf))[0]
+    controller_plant.WeldFrames(controller_plant.world_frame(), controller_plant.GetFrameByName(base_link_name))
+    for joint_name, effort in joint_efforts.items():
+        joint = controller_plant.GetJointByName(joint_name, model_instance)
+        controller_plant.AddJointActuator(f"{joint_name}_actuator", joint, effort)
+    controller_plant.Finalize()
+    return controller_plant
+
+
+def _add_inverse_dynamics_controller(builder, plant, controller_plant, joint_names, model_instance, pd_gains):
+    gains = [pd_gains[name] for name in joint_names]
+    kp = np.array([g[0] for g in gains])
+    kd = np.array([g[1] for g in gains])
+    ki = np.zeros(len(joint_names))
+
+    controller = builder.AddSystem(InverseDynamicsController(controller_plant, kp, ki, kd, False))
+
+    joint_indices = [plant.GetJointByName(name, model_instance).index() for name in joint_names]
+    state_selector = plant.MakeStateSelectorMatrix(joint_indices)
+    selector = builder.AddSystem(MatrixGain(state_selector))
+    builder.Connect(plant.get_state_output_port(), selector.get_input_port())
+    builder.Connect(selector.get_output_port(), controller.get_input_port_estimated_state())
+
+    setpoint_source = builder.AddSystem(ConstantVectorSource(np.zeros(2 * len(joint_names))))
+    builder.Connect(setpoint_source.get_output_port(), controller.get_input_port_desired_state())
+    builder.Connect(controller.get_output_port_control(), plant.get_actuation_input_port(model_instance))
     return setpoint_source
 
 
@@ -394,11 +415,17 @@ def build_arm_gripper_scene(
         _filter_robot_self_collisions(robot_diagram_builder.scene_graph(), plant, arm_index, gripper_index)
         config = VisualizationConfig(publish_contacts=True, enable_alpha_sliders=True)
         ApplyVisualizationConfig(config, builder=builder, plant=plant, meshcat=meshcat)
-        arm_setpoint_source = _add_pd_controller(
-            builder, plant, list(ARM_PD_GAINS.keys()), arm_index, ARM_PD_GAINS
+
+        arm_controller_plant = _build_controller_plant(ARM_URDF, "base_link", ARM_JOINT_EFFORTS)
+        gripper_controller_plant = _build_controller_plant(
+            GRIPPER_URDF, "right_base_link", REVO2_JOINT_EFFORTS, fixed_joint_names=set(REVO2_MIMIC_JOINTS.keys())
         )
-        gripper_setpoint_source = _add_pd_controller(
-            builder, plant, list(REVO2_PD_GAINS.keys()), gripper_index, REVO2_PD_GAINS
+
+        arm_setpoint_source = _add_inverse_dynamics_controller(
+            builder, plant, arm_controller_plant, list(ARM_PD_GAINS.keys()), arm_index, ARM_PD_GAINS
+        )
+        gripper_setpoint_source = _add_inverse_dynamics_controller(
+            builder, plant, gripper_controller_plant, list(REVO2_PD_GAINS.keys()), gripper_index, REVO2_PD_GAINS
         )
         robot_diagram = robot_diagram_builder.Build()
         context = robot_diagram.CreateDefaultContext()
