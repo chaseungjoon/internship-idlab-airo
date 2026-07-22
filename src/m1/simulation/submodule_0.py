@@ -50,6 +50,7 @@ LIFT_SUCCESS_TOLERANCE = 0.05
 MIN_REACH = 0.25
 MAX_REACH = 0.45
 MAX_SAMPLE_ATTEMPTS = 20
+IK_RANDOM_RESTARTS = 15
 
 MIN_HEIGHT_ABOVE_TABLE = 0.002
 MAX_HEIGHT_ABOVE_TABLE = 0.05
@@ -174,12 +175,25 @@ def estimate_brick_pose(points_world):
     return centroid[0], centroid[1], yaw
 
 
+def _arm_joint_limits(plant, arm_index):
+    lower, upper = [], []
+    for name in ARM_JOINT_NAMES:
+        joint = plant.GetJointByName(name, arm_index)
+        lower.append(joint.position_lower_limits()[0])
+        upper.append(joint.position_upper_limits()[0])
+    return np.array(lower), np.array(upper)
+
+
 def _solve_ik(kinematics: RobotKinematics, plant, arm_index, X_W_Base: RigidTransform, X_W_Target: RigidTransform, q_init):
     X_Base_Target = X_W_Base.inverse() @ X_W_Target
-    q_target = kinematics.inverse_kinematics_from_q0(q_init, X_Base_Target, ignore_collisions=True)
-    if q_target is None:
-        raise RuntimeError(f"IK failed to reach target pose:\n{X_W_Target}")
-    return q_target
+    lower, upper = _arm_joint_limits(plant, arm_index)
+    rng = np.random.default_rng(0)
+    guesses = [np.asarray(q_init)] + [rng.uniform(lower, upper) for _ in range(IK_RANDOM_RESTARTS)]
+    for guess in guesses:
+        q_target = kinematics.inverse_kinematics_from_q0(guess, X_Base_Target, ignore_collisions=True)
+        if q_target is not None:
+            return q_target
+    raise RuntimeError(f"IK failed to reach target pose:\n{X_W_Target}")
 
 
 def run_pick_demo(meshcat: Meshcat, brick_urdf_path: Path, rng_seed=None, realtime_rate: float = 1.0) -> bool:
