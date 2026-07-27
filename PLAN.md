@@ -19,6 +19,21 @@ Lego bricks sorted by shape or shape and color
 
 ## Modules
 
+### Module 0
+
+> Objective: Practice - command the BrainCo Revo2 hand directly, in sim and on hardware
+
+- Description: Used to learn the joint space, find and store the grasp poses that M1 replays, and measure where the sim disagrees with the hardware.
+
+- Interface
+    - Input: 6 normalized finger commands in [0, 1] (thumb, thumb_aux, index, middle, ring, pinky)
+    - Output: hand pose in sim / on hardware, measured positions and currents
+
+- Implementation
+    - Simulation ([src/m0/simulation](src/m0/simulation)): pydrake + Meshcat, kinematic. Playground for the joint space, aperture calibration, grasp poses sized to brick dimensions -> `poses.json`
+    - Physical ([src/m0/physical](src/m0/physical)): bc_stark_sdk over RS-485. Replays `poses.json`, detects contact from motor current, records what the hand reached -> `poses_measured.json`
+    - The two stacks share only [src/m0/hand_model.py](src/m0/hand_model.py): the finger table and the normalized pose vector
+
 ### Module 1
 
 > Objective: Grasp a single lego brick from the pile

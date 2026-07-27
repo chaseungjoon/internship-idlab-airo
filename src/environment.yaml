@@ -14,8 +14,11 @@ dependencies:
   - overrides
   - requests
   - jupyter
+  - ipywidgets
   - treelib
   - pip:
+      # Real Revo2 hand (M0/M1 physical): pip install bc-stark-sdk
+      # Left out here on purpose - it is Linux + hardware only.
       - drake==1.32.0
       - ompl
       - "linen @ git+https://github.com/Victorlouisdg/linen@main#subdirectory=linen"
