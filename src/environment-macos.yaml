@@ -25,3 +25,4 @@ dependencies:
       - airo-dataset-tools==2025.4.0
       - airo-drake
       - airo-planner
+      - Robotic_Arm
