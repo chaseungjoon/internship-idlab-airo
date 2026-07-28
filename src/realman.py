@@ -461,7 +461,7 @@ if __name__ == "__main__":
     from airo_robots.manipulators.hardware.manual_manipulator_testing import manual_test_robot
 
     @click.command()
-    @click.option("--ip-address", required=True, help="IP address of the RealMan robot.")
+    @click.option("--ip-address", default="192.168.1.18", help="IP address of the RealMan robot.")
     @click.option("--port", default=8080, show_default=True, help="RealMan controller port.")
     def test_realman(ip_address: str, port: int) -> None:
         """Run the manual manipulator tests against a RealMan robot."""

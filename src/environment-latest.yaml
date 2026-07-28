@@ -1,0 +1,23 @@
+name: airo-mono
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - scipy
+  - matplotlib
+  - numpy
+  - pip
+  - loguru
+  - overrides
+  - requests
+  - jupyter
+  - ipywidgets
+  - treelib
+  - pip
+  - pip:
+    - airo-typing
+    - airo-spatial-algebra
+    - airo-camera-toolkit
+    - airo-robots
+    - airo-dataset-tools
+    - Robotic_Arm
