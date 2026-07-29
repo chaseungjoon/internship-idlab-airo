@@ -37,7 +37,7 @@ from scene import (
     build_arm_gripper_scene,
     resting_z_offset,
 )
-from submodule_0 import (
+from m1.simulation.submodule_0 import (
     BASE_EXCLUSION_RADIUS,
     DESCEND_DURATION,
     GRASP_ROTATION_BASE,

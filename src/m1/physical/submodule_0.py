@@ -1,20 +1,36 @@
+import contextlib
 import glob
 import json
 import os
 import time
-from typing import Optional, Tuple
+from typing import Iterator, Optional, Tuple
 
 import click
 import cv2
 import numpy as np
 from airo_camera_toolkit.cameras.realsense.realsense import Realsense
 from airo_camera_toolkit.interfaces import RGBDCamera
-from airo_robots.manipulators.hardware.realman import RealmanControl
-from airo_robots.manipulators.hardware.ur_rtde import URrtde
 from airo_robots.manipulators.position_manipulator import PositionManipulator
 from airo_spatial_algebra import SE3Container
 from airo_typing import HomogeneousMatrixType, NumpyIntImageType
 from loguru import logger
+
+# The two supported arms share the airo-robots PositionManipulator interface, so everything below
+# the connection layer is robot-agnostic. Their drivers are imported lazily in create_arm() so a
+# machine set up for only one arm needn't have the other's (optional) driver installed.
+SUPPORTED_ROBOT_TYPES = ("ur3e", "realman")
+DEFAULT_IP_ADDRESSES = {"ur3e": "10.43.0.162", "realman": "192.168.1.18"}
+DEFAULT_REALMAN_PORT = 8080
+
+# Named RealSense colour resolutions (the wrapper picks the depth resolution itself). Lower is
+# lighter on USB bandwidth; a D415/D435 still needs a USB-3 link to stream colour+depth at all.
+CAMERA_RESOLUTIONS = {
+    "1080": Realsense.RESOLUTION_1080,
+    "720": Realsense.RESOLUTION_720,
+    "540": Realsense.RESOLUTION_540,
+    "480": Realsense.RESOLUTION_480,
+}
+DEFAULT_CAMERA_RESOLUTION = "720"
 
 DEFAULT_CALIBRATION_DIR = "/home/joon/int2026/calibration_dir"
 
@@ -32,6 +48,136 @@ REPLAN_POSITION_THRESHOLD = 0.01
 MAX_VISUAL_SERVO_DURATION = 20.0
 CONFIRMATION_SAMPLES = 3  # detections that must all agree before a re-plan is trusted.
 
+# A RealSense can't measure depth closer than its Min-Z (~0.3-0.45 m for the D415 at these
+# resolutions, less for a D435). This eye-in-hand camera looks straight down while approaching a
+# hover pose only centimetres above the table, so once it descends past this distance the brick
+# falls inside the sensor's blind zone and depth-based detection returns garbage. Below it we stop
+# visually correcting and let the current move finish open-loop toward the last confident target
+# (the brick's x, y is already known; only the descent remains). Tune to your camera's Min-Z.
+MIN_RELIABLE_DEPTH_DISTANCE = 0.30
+
+
+
+def create_arm(robot_type: str, ip_address: str, port: int) -> PositionManipulator:
+    """Construct and connect the manipulator driver for ``robot_type``.
+
+    Args:
+        robot_type: one of :data:`SUPPORTED_ROBOT_TYPES` (``"ur3e"`` or ``"realman"``).
+        ip_address: robot controller IP address.
+        port: controller port. Used by the RealMan driver only; the ur-rtde driver reaches the
+            UR3e on its fixed RTDE ports, so ``port`` is ignored for ``"ur3e"``.
+
+    Raises:
+        ValueError: if ``robot_type`` is not supported.
+    """
+    if robot_type == "realman":
+        from airo_robots.manipulators.hardware.realman import RealmanControl
+
+        return RealmanControl(ip_address, port)
+    if robot_type == "ur3e":
+        from airo_robots.manipulators.hardware.ur_rtde import URrtde
+
+        arm = URrtde(ip_address)
+        detected_model = arm.model.value.lower()
+        if detected_model != "ur3e":
+            logger.warning(
+                f"--robot_type ur3e was requested, but the arm at {ip_address} reports model "
+                f"'{arm.model.value}'; continuing with the connected robot."
+            )
+        return arm
+    raise ValueError(f"Unsupported robot type {robot_type!r}; expected one of {SUPPORTED_ROBOT_TYPES}.")
+
+
+def _disconnect_arm(arm: PositionManipulator) -> None:
+    """Release the robot connection, whatever teardown the driver exposes.
+
+    ``RealmanControl`` provides ``close()``; ``URrtde`` has no teardown of its own, so its
+    underlying RTDE interfaces are disconnected directly. Cleanup errors are logged and
+    swallowed so they can never mask an exception propagating out of the ``with`` block.
+    """
+    try:
+        close = getattr(arm, "close", None)
+        if callable(close):
+            close()
+            return
+        for interface_name in ("rtde_control", "rtde_receive"):
+            interface = getattr(arm, interface_name, None)
+            if interface is not None and hasattr(interface, "disconnect"):
+                interface.disconnect()
+    except Exception as exception:  # noqa: BLE001 - teardown must never raise
+        logger.warning(f"Ignoring error while disconnecting the arm: {exception}")
+
+
+@contextlib.contextmanager
+def connect_arm(robot_type: str, ip_address: str, port: int) -> Iterator[PositionManipulator]:
+    """Yield a connected arm and guarantee it is released afterwards.
+
+    Presents both drivers behind one ``with`` block despite their differing lifecycles
+    (``RealmanControl`` is itself a context manager, ``URrtde`` is not), and turns a failed
+    connection into an actionable error rather than a raw driver traceback.
+    """
+    logger.info(f"Connecting to {robot_type} arm at {ip_address}...")
+    try:
+        arm = create_arm(robot_type, ip_address, port)
+    except Exception as exception:
+        endpoint = f"{ip_address}:{port}" if robot_type == "realman" else ip_address
+        raise RuntimeError(
+            f"Could not connect to the {robot_type} arm at {endpoint}. Check the IP/port, that the "
+            f"robot is powered on and in remote control, and the network connection. "
+            f"Original error: {exception}"
+        ) from exception
+    logger.info(f"Connected to {robot_type} arm.")
+    try:
+        yield arm
+    finally:
+        _disconnect_arm(arm)
+
+
+def _realsense_diagnostics() -> str:
+    """Best-effort one-line description of the connected RealSense(s) for error messages."""
+    try:
+        import pyrealsense2 as rs
+
+        descriptions = []
+        for device in rs.context().query_devices():
+            name = device.get_info(rs.camera_info.name) if device.supports(rs.camera_info.name) else "unknown"
+            usb = (
+                device.get_info(rs.camera_info.usb_type_descriptor)
+                if device.supports(rs.camera_info.usb_type_descriptor)
+                else "?"
+            )
+            descriptions.append(f"{name} on a USB {usb} link")
+        return "; ".join(descriptions) if descriptions else "no RealSense devices detected"
+    except Exception as exception:  # noqa: BLE001 - diagnostics must never mask the real error
+        return f"(could not enumerate RealSense devices: {exception})"
+
+
+@contextlib.contextmanager
+def open_camera(resolution: Tuple[int, int]) -> Iterator[Realsense]:
+    """Open the RealSense at ``resolution``, turning a failed start into an actionable error.
+
+    librealsense reports an unsatisfiable stream request as the opaque "Couldn't resolve
+    requests"; the usual cause is a D415/D435 on a USB-2 link, which can't stream the
+    colour+depth the pipeline needs. This adds the detected device/USB type and a concrete fix
+    to that message, and guarantees the pipeline is stopped on exit.
+    """
+    # Hole-filling is disabled: on a poorly-reflecting table (poor IR depth return), it was
+    # smearing unrelated far-away depth across the holes instead of leaving them invalid, which is
+    # what fill_invalid_depth_with_table_estimate needs to do instead (fill with the *table's* depth).
+    try:
+        camera = Realsense(resolution=resolution, fps=30, enable_hole_filling=False)
+    except RuntimeError as exception:
+        raise RuntimeError(
+            f"Could not start the RealSense at {resolution[0]}x{resolution[1]} (color) + depth: {exception}. "
+            f"Detected {_realsense_diagnostics()}. A D415/D435 needs a USB-3 connection (a blue USB-3 port, "
+            f"the camera's USB-3 cable, and no USB-2 hub in between) to stream color+depth; on a USB-2 link "
+            f"librealsense fails with 'Couldn't resolve requests'. Switch to USB 3, or try a lower "
+            f"--camera-resolution."
+        ) from exception
+    try:
+        yield camera
+    finally:
+        camera.pipeline.stop()
 
 
 def load_camera_pose_in_tcp(calibration_dir: str) -> HomogeneousMatrixType:
@@ -253,7 +399,8 @@ def find_reachable_hover_orientation(
     """Find a straight-down TCP pose at ``position`` that the arm can actually reach.
 
     Tries each of ``HOVER_YAW_CANDIDATES`` (rotations about the vertical tool axis) and returns
-    the first one :meth:`RealmanControl.inverse_kinematics` reports as solvable. A fixed yaw can
+    the first one the arm's :meth:`~airo_robots.manipulators.position_manipulator.PositionManipulator.inverse_kinematics`
+    reports as solvable. A fixed yaw can
     be kinematically unreachable at some (x, y) — hitting a joint limit or wrist singularity —
     even though the position itself, and a straight-down orientation in general, clearly aren't
     the problem; the yaw is a free choice here, so there's no reason to fail instead of trying
@@ -358,6 +505,10 @@ def move_to_brick_with_visual_correction(
     same wrong candidate can still slip through — requiring a larger consensus makes that far
     less likely.
 
+    Correction stops once the camera descends within ``MIN_RELIABLE_DEPTH_DISTANCE`` of the table:
+    inside the depth sensor's Min-Z blind zone the brick can't be measured, so the move simply
+    finishes open-loop toward the last confident target rather than reacting to garbage depth.
+
     Assumes the controller accepts a new ``move_to_tcp_pose`` while a previous one is still
     in flight and replaces it (rather than queueing or rejecting it) — verify this on hardware;
     if it doesn't, this will need an explicit stop/cancel before re-issuing the move.
@@ -375,6 +526,20 @@ def move_to_brick_with_visual_correction(
         time.sleep(SERVO_INTERVAL)
 
         if action.is_action_done():
+            break
+
+        # Once the camera descends inside the depth sensor's blind zone (see
+        # MIN_RELIABLE_DEPTH_DISTANCE), depth-based detection only produces garbage, which would
+        # otherwise get the real brick rejected as "too tall". Stop correcting and let the move
+        # finish toward the last confident target instead of chasing that noise.
+        X_base_camera_now = arm.get_tcp_pose() @ X_tcp_camera
+        camera_height_above_table = float(X_base_camera_now[2, 3] - brick_pose[2])
+        if camera_height_above_table < MIN_RELIABLE_DEPTH_DISTANCE:
+            logger.info(
+                f"Camera is {camera_height_above_table * 100:.0f} cm above the table, inside the depth "
+                f"sensor's blind zone (< {MIN_RELIABLE_DEPTH_DISTANCE * 100:.0f} cm Min-Z); stopping "
+                "visual correction and finishing the move to the last confident target."
+            )
             break
 
         try:
@@ -429,16 +594,53 @@ def move_to_brick_with_visual_correction(
 
 
 @click.command()
-@click.option("--ip-address", default="192.168.1.18", help="IP address of the RealMan robot.")
-@click.option("--port", default=8080, show_default=True, help="RealMan controller port.")
-@click.option("--speed-ratio", default=10, show_default=True, help="1..100, fraction of the arm's max joint speed.")
+@click.option(
+    "--robot-type",
+    "robot_type",
+    type=click.Choice(SUPPORTED_ROBOT_TYPES),
+    default="ur3e",
+    show_default=True,
+    help="Which arm to control.",
+)
+@click.option(
+    "--ip-address",
+    default=None,
+    help="Robot controller IP address. Defaults per robot type "
+    f"(ur3e: {DEFAULT_IP_ADDRESSES['ur3e']}, realman: {DEFAULT_IP_ADDRESSES['realman']}).",
+)
+@click.option(
+    "--port",
+    default=DEFAULT_REALMAN_PORT,
+    show_default=True,
+    help="Controller port (RealMan only; ignored for the UR3e).",
+)
+@click.option(
+    "--speed-ratio",
+    type=click.IntRange(1, 100),
+    default=10,
+    show_default=True,
+    help="1..100, fraction of the arm's max joint speed.",
+)
 @click.option(
     "--calibration-path",
     default=DEFAULT_CALIBRATION_DIR,
     show_default=True,
     help="Path to the hand-eye-calibration --calibration_dir output directory.",
 )
-@click.option("--hover-height", default=0.07, show_default=True, help="Metres above the table plane to hover at.")
+@click.option(
+    "--hover-height",
+    type=click.FloatRange(min=0.0, min_open=True),
+    default=0.07,
+    show_default=True,
+    help="Metres above the table plane to hover at.",
+)
+@click.option(
+    "--camera-resolution",
+    type=click.Choice(list(CAMERA_RESOLUTIONS)),
+    default=DEFAULT_CAMERA_RESOLUTION,
+    show_default=True,
+    help="RealSense colour resolution (height). A D415/D435 needs USB 3 to stream colour+depth.",
+)
 @click.option(
     "--debug-dir",
     default=None,
@@ -446,16 +648,23 @@ def move_to_brick_with_visual_correction(
     "for after-the-fact inspection -- there's no live display during a run.",
 )
 def main(
-    ip_address: str, port: int, speed_ratio: int, calibration_path: str, hover_height: float, debug_dir: Optional[str]
+    robot_type: str,
+    ip_address: Optional[str],
+    port: int,
+    speed_ratio: int,
+    calibration_path: str,
+    hover_height: float,
+    camera_resolution: str,
+    debug_dir: Optional[str],
 ) -> None:
-    """Detect a lego brick on a black table and move the TCP to hover above it."""
+    """Detect a lego brick on a table and move the TCP to hover above it (UR3e or RealMan)."""
+    if ip_address is None:
+        ip_address = DEFAULT_IP_ADDRESSES[robot_type]
+
     X_tcp_camera = load_camera_pose_in_tcp(calibration_path)
 
-    # Hole-filling is disabled: on a black table (poor IR depth return), it was smearing
-    # unrelated far-away depth across the holes instead of leaving them invalid, which is what
-    # fill_invalid_depth_with_table_estimate needs to do instead (fill with the *table's* depth).
-    with RealmanControl(ip_address, port) as arm, Realsense(
-        resolution=Realsense.RESOLUTION_1080, enable_hole_filling=False
+    with connect_arm(robot_type, ip_address, port) as arm, open_camera(
+        CAMERA_RESOLUTIONS[camera_resolution]
     ) as camera:
         joint_speed = speed_ratio / 100 * min(arm.manipulator_specs.max_joint_speeds)
 

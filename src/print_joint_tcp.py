@@ -8,6 +8,7 @@ import sys
 
 UR_MODELS = {"ur3", "ur3e", "ur5e"}
 DEFAULT_REALMAN_IP = "192.168.1.18"
+DEFAULT_UR3E_IP = "10.43.0.162"
 DEFAULT_REALMAN_PORT = 8080
 
 
@@ -15,13 +16,13 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument(
         "--robot",
-        default="realman",
+        default="ur3e",
         choices=sorted(UR_MODELS | {"realman"}),
         help="Robot type to connect to.",
     )
     parser.add_argument(
         "--ip",
-        default=DEFAULT_REALMAN_IP,
+        default=DEFAULT_UR3E_IP,
         help=f"IP address of the robot controller (default for realman: {DEFAULT_REALMAN_IP}; required for UR robots).",
     )
     parser.add_argument(
@@ -66,6 +67,9 @@ def main() -> None:
         print(f"error: could not connect to {args.robot} robot: {e}", file=sys.stderr)
         sys.exit(1)
 
+    arm.rtde_control.teachMode()
+    input("press any key")
+    arm.rtde_control.endTeachMode()
     print(f"Joint configuration: {arm.get_joint_configuration()}")
     print(f"TCP pose:\n{arm.get_tcp_pose()}")
 
