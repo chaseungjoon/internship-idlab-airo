@@ -64,7 +64,14 @@ OBSERVE_EYE_ANGLE = np.deg2rad(35)
 OBSERVE_TARGET = np.array([0.2, 0.15, 0.0])
 OBSERVE_INITIAL_GUESS = np.array([0.0, -np.pi / 2, np.pi / 2, -np.pi / 2, -np.pi / 2, 0.0])
 
-ARM_JOINT_NAMES = ["joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6"]
+ARM_JOINT_NAMES = [
+    "shoulder_pan_joint",
+    "shoulder_lift_joint",
+    "elbow_joint",
+    "wrist_1_joint",
+    "wrist_2_joint",
+    "wrist_3_joint",
+]
 GRIPPER_JOINT_NAMES = list(REVO2_FINGER_JOINTS.keys())
 
 

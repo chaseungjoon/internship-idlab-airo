@@ -1,4 +1,4 @@
-"""MVP item 2: rotate the RM75 wrist through a few configurations, publish
+"""MVP item 2: rotate the UR3e wrist through a few configurations, publish
 each to Meshcat, and render an RGB frame from a fixed simulated camera at
 each step. Frames are saved to src/data/pretrain_frames/ as a tiny image
 dataset stub for later perception pretraining.
@@ -29,10 +29,10 @@ from pydrake.planning import RobotDiagramBuilder
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FRAMES_DIR = Path(__file__).resolve().parent / "data" / "pretrain_frames"
 
-# Wrist joint (joint_7, the 7th/last RM75 joint) sweep, in radians.
+# Wrist joint (wrist_3_joint, the 6th/last UR3e joint) sweep, in radians.
 WRIST_ANGLES = np.linspace(-np.pi / 2, np.pi / 2, 5)
 
-BASE_ARM_CONFIGURATION = np.array([np.pi / 2, -np.pi / 4, 0, np.pi / 3, 0, np.pi / 3, 0])
+BASE_ARM_CONFIGURATION = np.array([0, -np.pi / 3, -np.pi / 3, -np.pi / 2, -np.pi / 2, 0])
 
 
 def _add_fixed_camera(robot_diagram_builder: RobotDiagramBuilder, renderer_name: str = "vtk_renderer"):
@@ -58,7 +58,7 @@ def _add_fixed_camera(robot_diagram_builder: RobotDiagramBuilder, renderer_name:
 
 
 def build_scene_with_camera(meshcat: Meshcat):
-    """RM75-only scene (no hand) plus a fixed RGB-D camera.
+    """UR3e-only scene (no hand) plus a fixed RGB-D camera.
 
     The wrist-rotation render demo only needs the arm, so the hand is left
     out here (it's still used in grab_demo.py, which only visualizes through

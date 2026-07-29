@@ -32,9 +32,15 @@ from pydrake.visualization import ApplyVisualizationConfig, VisualizationConfig
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_BRICK_URDF = REPO_ROOT / "lego_3d" / "urdf" / "3005__light_bluish_gray.urdf"
-ARM_URDF = REPO_ROOT / "src" / "assets" / "rm75" / "urdf" / "rm75.urdf"
+ARM_URDF = REPO_ROOT / "src" / "assets" / "ur3e" / "ur3e.urdf"
 GRIPPER_URDF = REPO_ROOT / "src" / "assets" / "revo2" / "urdf" / "revo2_right_hand.urdf"
 NORMALS_CACHE_DIR = REPO_ROOT / "src" / "assets" / "normals_cache"
+
+#: Link welded to the world (arm base) and the flange frame the gripper/TCP/camera hang off.
+#: The UR3e ships a ``base`` frame (used by RobotKinematics) and an all-zeros ``tool0`` tool
+#: frame with Z+ pointing out of the flange, which is the natural gripper-mount frame.
+ARM_BASE_LINK = "base_link"
+ARM_TOOL_FRAME = "tool0"
 
 
 def _has_normals(obj_path: Path) -> bool:
@@ -132,7 +138,9 @@ def resting_z_offset(urdf_path: Path) -> float:
     return -_mesh_z_min(mesh_path) * scale_z
 
 
-TCP_OFFSET = RigidTransform(RotationMatrix.Identity(), [0.033, 0.019, 0.074])
+# TCP sits at the Revo2 thumb-index pinch centre, measured in the UR3e tool0 frame
+# (fingers extend along tool0 +Z) at the lego_pinch pose.
+TCP_OFFSET = RigidTransform(RotationMatrix.Identity(), [0.062, 0.022, 0.084])
 
 REVO2_FINGER_JOINTS = {
     "right_thumb_metacarpal_joint": 0.9,
@@ -152,23 +160,22 @@ REVO2_MIMIC_JOINTS = {
 GRIPPER_OPEN = 0.0
 GRIPPER_CLOSED = 1.0
 
+# UR3e joint efforts (N·m) taken from the URDF limit values.
 ARM_JOINT_EFFORTS = {
-    "joint_1": 60.0,
-    "joint_2": 60.0,
-    "joint_3": 30.0,
-    "joint_4": 30.0,
-    "joint_5": 10.0,
-    "joint_6": 10.0,
-    "joint_7": 10.0,
+    "shoulder_pan_joint": 56.0,
+    "shoulder_lift_joint": 56.0,
+    "elbow_joint": 28.0,
+    "wrist_1_joint": 12.0,
+    "wrist_2_joint": 12.0,
+    "wrist_3_joint": 12.0,
 }
 ARM_PD_GAINS = {
-    "joint_1": (400.0, 40.0),
-    "joint_2": (400.0, 40.0),
-    "joint_3": (400.0, 40.0),
-    "joint_4": (400.0, 40.0),
-    "joint_5": (400.0, 40.0),
-    "joint_6": (400.0, 40.0),
-    "joint_7": (400.0, 40.0),
+    "shoulder_pan_joint": (400.0, 40.0),
+    "shoulder_lift_joint": (400.0, 40.0),
+    "elbow_joint": (400.0, 40.0),
+    "wrist_1_joint": (400.0, 40.0),
+    "wrist_2_joint": (400.0, 40.0),
+    "wrist_3_joint": (400.0, 40.0),
 }
 REVO2_JOINT_EFFORTS = {
     "right_thumb_metacarpal_joint": 0.5,
@@ -350,7 +357,7 @@ def _add_wrist_camera(robot_diagram_builder: RobotDiagramBuilder, plant, arm_ind
         RenderCameraCore(CAMERA_RENDERER_NAME, intrinsics, clipping, RigidTransform()), DepthRange(0.05, 3.0)
     )
 
-    flange_body = plant.GetBodyByName("link_7", arm_index)
+    flange_body = plant.GetBodyByName(ARM_TOOL_FRAME, arm_index)
     flange_frame_id = plant.GetBodyFrameIdOrThrow(flange_body.index())
 
     builder = robot_diagram_builder.builder()
@@ -392,15 +399,16 @@ def build_arm_gripper_scene(
     camera_sensor = _add_wrist_camera(robot_diagram_builder, plant, arm_index) if add_camera else None
 
     world_frame = plant.world_frame()
-    arm_frame = plant.GetFrameByName("base_link", arm_index)
-    arm_tool_frame = plant.GetFrameByName("link_7", arm_index)
+    arm_frame = plant.GetFrameByName(ARM_BASE_LINK, arm_index)
+    arm_tool_frame = plant.GetFrameByName(ARM_TOOL_FRAME, arm_index)
     gripper_frame = plant.GetFrameByName("right_base_link", gripper_index)
 
     X_W_ArmBase = RigidTransform(RotationMatrix.MakeZRotation(ROBOT_BASE_YAW)) if add_table else RigidTransform()
     plant.WeldFrames(world_frame, arm_frame, X_W_ArmBase)
     plant.WeldFrames(arm_tool_frame, gripper_frame)
 
-    plant.AddFrame(FixedOffsetFrame("base", arm_frame, RigidTransform()))
+    # RobotKinematics resolves the IK base from a frame named "base"; the UR3e URDF already
+    # provides one (base_link rotated pi about Z, per ROS-Industrial convention), so we reuse it.
     arm_tcp_frame = plant.AddFrame(FixedOffsetFrame("tcp", arm_tool_frame, TCP_OFFSET))
     arm_camera_frame = plant.AddFrame(FixedOffsetFrame("camera", arm_tool_frame, CAMERA_TOOL0_OFFSET))
 

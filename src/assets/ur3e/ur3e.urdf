@@ -195,7 +195,7 @@
         <child link="shoulder_link"/>
         <origin rpy="0 0 0" xyz="0 0 0.15185"/>
         <axis xyz="0 0 1"/>
-        <limit drake:acceleration="2.5" effort="56.0" lower="-6.283185307179586" upper="6.283185307179586"
+        <limit effort="56.0" lower="-6.283185307179586" upper="6.283185307179586"
                velocity="3.14"/>
         <dynamics damping="0" friction="0"/>
     </joint>
@@ -204,7 +204,7 @@
         <child link="upper_arm_link"/>
         <origin rpy="1.570796327 0 0" xyz="0 0 0"/>
         <axis xyz="0 0 1"/>
-        <limit drake:acceleration="2.5" effort="56.0" lower="-6.283185307179586" upper="6.283185307179586"
+        <limit effort="56.0" lower="-6.283185307179586" upper="6.283185307179586"
                velocity="3.141592653589793"/>
         <dynamics damping="0" friction="0"/>
     </joint>
@@ -213,7 +213,7 @@
         <child link="forearm_link"/>
         <origin rpy="0 0 0" xyz="-0.24355 0 0"/>
         <axis xyz="0 0 1"/>
-        <limit drake:acceleration="2.5" effort="28.0" lower="-3.141592653589793" upper="3.141592653589793"
+        <limit effort="28.0" lower="-3.141592653589793" upper="3.141592653589793"
                velocity="3.141592653589793"/>
         <dynamics damping="0" friction="0"/>
     </joint>
@@ -222,7 +222,7 @@
         <child link="wrist_1_link"/>
         <origin rpy="0 0 0" xyz="-0.2132 0 0.13105"/>
         <axis xyz="0 0 1"/>
-        <limit drake:acceleration="2.5" effort="12.0" lower="-6.283185307179586" upper="6.283185307179586"
+        <limit effort="12.0" lower="-6.283185307179586" upper="6.283185307179586"
                velocity="6.283185307179586"/>
         <dynamics damping="0" friction="0"/>
     </joint>
@@ -231,7 +231,7 @@
         <child link="wrist_2_link"/>
         <origin rpy="1.570796327 0 0" xyz="0 -0.08535 -1.750557762378351e-11"/>
         <axis xyz="0 0 1"/>
-        <limit drake:acceleration="2.5" effort="12.0" lower="-6.283185307179586" upper="6.283185307179586"
+        <limit effort="12.0" lower="-6.283185307179586" upper="6.283185307179586"
                velocity="6.283185307179586"/>
         <dynamics damping="0" friction="0"/>
     </joint>
@@ -240,65 +240,10 @@
         <child link="wrist_3_link"/>
         <origin rpy="1.570796326589793 3.141592653589793 3.141592653589793" xyz="0 0.0921 -1.8890025766262e-11"/>
         <axis xyz="0 0 1"/>
-        <limit drake:acceleration="2.5" effort="12.0" lower="-6.283185307179586" upper="6.283185307179586"
+        <limit effort="12.0" lower="-6.283185307179586" upper="6.283185307179586"
                velocity="6.283185307179586"/> # the real joint limits are -inf and inf on the ur3e but this makes it difficult for the planner
         <dynamics damping="0" friction="0"/>
     </joint>
-    <!--  Specify which and how joints are actuated -->
-    <transmission name="shoulder_pan_trans">
-        <type>transmission_interface/SimpleTransmission</type>
-        <joint name="shoulder_pan_joint">
-            <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
-        </joint>
-        <actuator name="shoulder_pan_motor">
-            <mechanicalReduction>1</mechanicalReduction>
-        </actuator>
-    </transmission>
-    <transmission name="shoulder_lift_trans">
-        <type>transmission_interface/SimpleTransmission</type>
-        <joint name="shoulder_lift_joint">
-            <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
-        </joint>
-        <actuator name="shoulder_lift_motor">
-            <mechanicalReduction>1</mechanicalReduction>
-        </actuator>
-    </transmission>
-    <transmission name="elbow_trans">
-        <type>transmission_interface/SimpleTransmission</type>
-        <joint name="elbow_joint">
-            <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
-        </joint>
-        <actuator name="elbow_motor">
-            <mechanicalReduction>1</mechanicalReduction>
-        </actuator>
-    </transmission>
-    <transmission name="wrist_1_trans">
-        <type>transmission_interface/SimpleTransmission</type>
-        <joint name="wrist_1_joint">
-            <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
-        </joint>
-        <actuator name="wrist_1_motor">
-            <mechanicalReduction>1</mechanicalReduction>
-        </actuator>
-    </transmission>
-    <transmission name="wrist_2_trans">
-        <type>transmission_interface/SimpleTransmission</type>
-        <joint name="wrist_2_joint">
-            <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
-        </joint>
-        <actuator name="wrist_2_motor">
-            <mechanicalReduction>1</mechanicalReduction>
-        </actuator>
-    </transmission>
-    <transmission name="wrist_3_trans">
-        <type>transmission_interface/SimpleTransmission</type>
-        <joint name="wrist_3_joint">
-            <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
-        </joint>
-        <actuator name="wrist_3_motor">
-            <mechanicalReduction>1</mechanicalReduction>
-        </actuator>
-    </transmission>
     <!-- ROS-Industrial 'base' frame - base_link to UR 'Base' Coordinates transform -->
     <link name="base"/>
     <joint name="base_link-base_fixed_joint" type="fixed">
