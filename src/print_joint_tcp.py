@@ -1,5 +1,5 @@
 """
-    python print_joint_tcp.py --robot ur3e --ip 10.42.0.162
+    python print_joint_tcp.py --robot ur3e --ip 10.43.0.162
     python print_joint_tcp.py --robot realman
 """
 
