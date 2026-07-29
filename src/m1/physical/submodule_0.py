@@ -17,34 +17,20 @@ from loguru import logger
 
 DEFAULT_CALIBRATION_DIR = "/home/joon/int2026/calibration_dir"
 
-HOVER_ORIENTATION_EULER = np.array([0, np.pi, 0.0001])  # tool Z pointing straight down
-# Nothing about hovering above the brick requires a specific gripper yaw, so when the "obvious"
-# yaw turns out to be kinematically unreachable (joint limit / wrist singularity) for a given
-# (x, y), we're free to try others instead of just failing.
+HOVER_ORIENTATION_EULER = np.array([0, np.pi, 0.0001]) 
 HOVER_YAW_CANDIDATES = np.linspace(0, 2 * np.pi, 8, endpoint=False)
 
-MIN_VALID_DEPTH = 0.10  # metres, drops zero/invalid depth points
-# MVP assumption: a single brick on an otherwise uniformly-coloured table, camera pointed
-# straight at it -- so whatever colour covers most of the frame is the table, and anything that
-# stands out from it by more than this (Euclidean RGB distance, 0..~441) is the brick. This is
-# relative to the scene's own dominant colour each frame, rather than an assumed-black table, so
-# it isn't thrown off by lighting/glare changes shifting the table's absolute brightness.
+MIN_VALID_DEPTH = 0.10 
 COLOR_ANOMALY_THRESHOLD = 40
-MIN_BRICK_CONTOUR_AREA = 200  # pixels, rejects noise blobs
-MAX_HEIGHT_ABOVE_TABLE = 0.05  # metres, above this it's not a single standalone brick (e.g. the arm/gripper)
+MIN_BRICK_CONTOUR_AREA = 200
+MAX_HEIGHT_ABOVE_TABLE = 0.05
 
-# Visual correction while moving: re-detect the brick periodically during the move and re-plan
-# if the estimate has drifted, rather than trusting a single detection made before moving at all.
 SERVO_INTERVAL = 0.5  # seconds between re-detections while the arm is moving towards the brick.
-# A blind first guess: fast enough to catch and correct drift/calibration error well before
-# arrival, slow enough not to spam rm_movej_p with replans faster than the controller/camera can
-# actually respond to. Tune against how it behaves on the real setup.
-REPLAN_POSITION_THRESHOLD = 0.01  # metres; re-plan the move if the updated target drifts more than this
-MAX_VISUAL_SERVO_DURATION = 20.0  # seconds; safety cutoff if detection never stabilizes
-CONFIRMATION_SAMPLES = 3  # detections that must all agree (within REPLAN_POSITION_THRESHOLD of their
-# mean) before a re-plan is trusted. A single pair of frames agreeing can still both be wrong at
-# once (e.g. the same reflection or the gripper mis-detected twice in a row); requiring more
-# independent agreement makes that far less likely without giving up on catching genuine drift.
+
+REPLAN_POSITION_THRESHOLD = 0.01
+MAX_VISUAL_SERVO_DURATION = 20.0
+CONFIRMATION_SAMPLES = 3  # detections that must all agree before a re-plan is trusted.
+
 
 
 def load_camera_pose_in_tcp(calibration_dir: str) -> HomogeneousMatrixType:
@@ -490,10 +476,6 @@ def main(
         )
         logger.info(f"reached:\n{arm.get_tcp_pose()}")
 
-    # The RealMan SDK's triple-thread mode leaves background threads running even after
-    # arm.close() (rm_delete_robot_arm) returns, which stalls interpreter shutdown. Everything
-    # of ours is already cleanly closed by the `with` block above, so force-exit here rather
-    # than hang waiting on threads we don't own.
     os._exit(0)
 
 

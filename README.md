@@ -25,8 +25,7 @@ cd internship-idlab-airo
 - Setup
 
 ```bash
-conda env create -f src/environment.yaml    #linux
-conda env create -f src/environment-macos.yaml    #macos
+conda env create -f src/environment-latest.yaml   
 ```
 ```bash
 conda activate int2026

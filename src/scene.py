@@ -32,7 +32,7 @@ from pydrake.visualization import ApplyVisualizationConfig, VisualizationConfig
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_BRICK_URDF = REPO_ROOT / "lego_3d" / "urdf" / "3005__light_bluish_gray.urdf"
-ARM_URDF = REPO_ROOT / "src" / "assets" / "rm65" / "urdf" / "rm65.urdf"
+ARM_URDF = REPO_ROOT / "src" / "assets" / "rm75" / "urdf" / "rm75.urdf"
 GRIPPER_URDF = REPO_ROOT / "src" / "assets" / "revo2" / "urdf" / "revo2_right_hand.urdf"
 NORMALS_CACHE_DIR = REPO_ROOT / "src" / "assets" / "normals_cache"
 
@@ -156,9 +156,10 @@ ARM_JOINT_EFFORTS = {
     "joint_1": 60.0,
     "joint_2": 60.0,
     "joint_3": 30.0,
-    "joint_4": 10.0,
+    "joint_4": 30.0,
     "joint_5": 10.0,
     "joint_6": 10.0,
+    "joint_7": 10.0,
 }
 ARM_PD_GAINS = {
     "joint_1": (400.0, 40.0),
@@ -167,6 +168,7 @@ ARM_PD_GAINS = {
     "joint_4": (400.0, 40.0),
     "joint_5": (400.0, 40.0),
     "joint_6": (400.0, 40.0),
+    "joint_7": (400.0, 40.0),
 }
 REVO2_JOINT_EFFORTS = {
     "right_thumb_metacarpal_joint": 0.5,
@@ -348,7 +350,7 @@ def _add_wrist_camera(robot_diagram_builder: RobotDiagramBuilder, plant, arm_ind
         RenderCameraCore(CAMERA_RENDERER_NAME, intrinsics, clipping, RigidTransform()), DepthRange(0.05, 3.0)
     )
 
-    flange_body = plant.GetBodyByName("link_6", arm_index)
+    flange_body = plant.GetBodyByName("link_7", arm_index)
     flange_frame_id = plant.GetBodyFrameIdOrThrow(flange_body.index())
 
     builder = robot_diagram_builder.builder()
@@ -391,7 +393,7 @@ def build_arm_gripper_scene(
 
     world_frame = plant.world_frame()
     arm_frame = plant.GetFrameByName("base_link", arm_index)
-    arm_tool_frame = plant.GetFrameByName("link_6", arm_index)
+    arm_tool_frame = plant.GetFrameByName("link_7", arm_index)
     gripper_frame = plant.GetFrameByName("right_base_link", gripper_index)
 
     X_W_ArmBase = RigidTransform(RotationMatrix.MakeZRotation(ROBOT_BASE_YAW)) if add_table else RigidTransform()
