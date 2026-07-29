@@ -8,7 +8,9 @@ From a pile of lego bricks, grab, identify and sort each brick (by shape / shape
 
 ```
 Pile of unsorted lego bricks
-Realman arm
+Universal Robots UR3e
+Realman RM75
+Robotiq 2F Adaptive gripper
 BrainCo Bionic Dexterous Hand (BC-Revo-2)
 Realsense RGBD camera
 ```

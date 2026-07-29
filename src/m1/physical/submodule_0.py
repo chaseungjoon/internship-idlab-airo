@@ -10,6 +10,7 @@ import numpy as np
 from airo_camera_toolkit.cameras.realsense.realsense import Realsense
 from airo_camera_toolkit.interfaces import RGBDCamera
 from airo_robots.manipulators.hardware.realman import RealmanControl
+from airo_robots.manipulators.hardware.ur_rtde import URrtde
 from airo_robots.manipulators.position_manipulator import PositionManipulator
 from airo_spatial_algebra import SE3Container
 from airo_typing import HomogeneousMatrixType, NumpyIntImageType
