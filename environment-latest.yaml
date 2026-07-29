@@ -21,4 +21,3 @@ dependencies:
     - airo-robots
     - airo-dataset-tools
     - Robotic_Arm
-    - bc-stark-sdk
