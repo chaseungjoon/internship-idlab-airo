@@ -8,22 +8,23 @@ from typing import Dict, Tuple
 import click
 import cv2
 import numpy as np
-from airo_robots.manipulators.position_manipulator import PositionManipulator
 from loguru import logger
 
-# capture.py lives at src/capture.py, next to config.py. submodule_0 carries the connection/
-# error-handling logic this reuses and lives one level down, at src/m1/physical/submodule_0.py.
+# capture.py lives at src/capture.py, next to config.py, which carries this cell's constants and the
+# connection/error-handling plumbing that goes with them.
 _SRC_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(_SRC_DIR, "m1", "physical"))
-sys.path.insert(0, _SRC_DIR)
-from config import (
+if _SRC_DIR not in sys.path:
+    sys.path.insert(0, _SRC_DIR)
+from config import (  # noqa: E402
     CAMERA_RESOLUTIONS,
     DEFAULT_CAMERA_RESOLUTION,
     DEFAULT_IP_ADDRESSES,
     DEFAULT_REALMAN_PORT,
     SUPPORTED_ROBOT_TYPES,
+    connect_arm,
+    ensure_control_ready,
+    open_camera,
 )
-from submodule_0 import connect_arm, open_camera
 
 DEFAULT_OUTPUT_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lego_pic"))
 FILENAME_PREFIX = "lego_pile"
@@ -43,25 +44,6 @@ COLOR_SAVED = (0, 220, 0)
 MESSAGE_DURATION = 1.5
 
 _QUIT_KEYS = (ord("q"), 27)
-
-
-def ensure_control_ready(arm: PositionManipulator) -> None:
-    """Re-arm the UR control script if it has stopped, e.g. after a protective stop mid-freedrive.
-
-    A long hands-on session is exactly when a protective stop (bumping the arm into something while
-    dragging it) is likely, and once the control script has stopped, ``teachMode()``/``endTeachMode()``
-    silently do nothing -- the next SPACE would look like it worked but leave the arm stuck. Only
-    ``URrtde`` exposes ``rtde_control``; ``RealmanControl`` doesn't need this and is left untouched.
-    """
-    rtde_control = getattr(arm, "rtde_control", None)
-    if rtde_control is None:
-        return
-    try:
-        if not rtde_control.isProgramRunning():
-            logger.warning("The UR control script had stopped (protective stop?); reuploading it.")
-            rtde_control.reuploadScript()
-    except Exception as exception:  # noqa: BLE001 - never let a recovery attempt crash the run
-        logger.warning(f"Could not verify/restart the UR control script: {exception}")
 
 
 def timestamped_stem(prefix: str = FILENAME_PREFIX) -> str:
