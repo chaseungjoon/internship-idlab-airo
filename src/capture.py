@@ -16,38 +16,33 @@ from loguru import logger
 _SRC_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(_SRC_DIR, "m1", "physical"))
 sys.path.insert(0, _SRC_DIR)
-from config import (  # noqa: E402
+from config import (
     CAMERA_RESOLUTIONS,
     DEFAULT_CAMERA_RESOLUTION,
     DEFAULT_IP_ADDRESSES,
     DEFAULT_REALMAN_PORT,
     SUPPORTED_ROBOT_TYPES,
 )
-from submodule_0 import connect_arm, open_camera  # noqa: E402
+from submodule_0 import connect_arm, open_camera
 
 DEFAULT_OUTPUT_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lego_pic"))
 FILENAME_PREFIX = "lego_pile"
 
-# cv2.imwrite params per --format. jpg matches the repo's existing lego_pile_1.jpeg and keeps a long
-# session's worth of photos small; png is available for when a session needs to be lossless.
 IMAGE_FORMATS: Dict[str, Tuple[str, list]] = {
     "jpg": (".jpg", [cv2.IMWRITE_JPEG_QUALITY, 95]),
     "png": (".png", [cv2.IMWRITE_PNG_COMPRESSION, 3]),
 }
-DEPTH_SUFFIX = "_depth"  # companion file for --save-depth: <same stem>_depth.png, 16-bit mm, lossless
-
-# Seconds to let the arm and the camera's auto-exposure settle after freedrive stops, before the
-# frame that gets saved is grabbed. See the module docstring for why.
+DEPTH_SUFFIX = "_depth"
 SETTLE_TIME = 0.4
 
 WINDOW_TITLE = "Lego pile capture -- SPACE: capture, Q: quit"
 FONT = cv2.FONT_HERSHEY_SIMPLEX
-COLOR_FREEDRIVE = (255, 200, 0)  # BGR, cyan-ish
-COLOR_CAPTURING = (0, 255, 255)  # yellow
-COLOR_SAVED = (0, 220, 0)  # green
-MESSAGE_DURATION = 1.5  # seconds the "SAVED ..." status stays up before reverting to the freedrive one
+COLOR_FREEDRIVE = (255, 200, 0)
+COLOR_CAPTURING = (0, 255, 255)
+COLOR_SAVED = (0, 220, 0)
+MESSAGE_DURATION = 1.5
 
-_QUIT_KEYS = (ord("q"), 27)  # q or Esc
+_QUIT_KEYS = (ord("q"), 27)
 
 
 def ensure_control_ready(arm: PositionManipulator) -> None:
