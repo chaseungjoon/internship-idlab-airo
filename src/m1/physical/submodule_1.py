@@ -35,6 +35,7 @@ from config import (
     ensure_control_ready,
     find_reachable_hover_orientation,
     load_camera_pose_in_tcp,
+    load_table_plane,
     open_camera,
 )
 from lego_catalog import load_catalog, parts_in_set
@@ -51,6 +52,10 @@ MIN_VALID_DEPTH = 0.10
 MIN_TABLE_DEPTH_POINTS = 500
 SUSPICIOUS_TABLE_DISAGREEMENT = 0.02
 LARGE_VIEW_DISAGREEMENT = 0.01
+TABLE_HEIGHT_BIN_SIZE = 0.002
+TABLE_LOWER_SURFACE_PERCENTILE = 35.0
+MAX_RUNTIME_FLOOR_TIGHTENING = 0.004
+MAX_RUNTIME_FLOOR_VIEW_SPREAD = 0.004
 
 _CONFIRM_KEYS = (13, 10, 32)
 _ABORT_KEYS = (27, ord("q"))
@@ -180,16 +185,38 @@ def project_ray_onto_height(ray: Tuple[np.ndarray, np.ndarray], z: float) -> np.
     Raises:
         RuntimeError: if the ray is (near-)parallel to the plane, or the plane is behind the camera.
     """
+    return project_ray_onto_plane(ray, 0.0, 0.0, z)
+
+
+def project_ray_onto_plane(ray: Tuple[np.ndarray, np.ndarray], a: float, b: float, c: float) -> np.ndarray:
+    """Intersect a base-frame ray with the plane ``z = a*x + b*y + c``.
+
+    The tilted generalisation of :func:`project_ray_onto_height`, so the clicked rays can be projected
+    onto the table plane ``calibrate_table.py`` actually touched rather than onto an assumed level one.
+    A tabletop tilted 1 degree relative to the robot's base is 7 mm out across a 40 cm workspace --
+    more than the fingertip clearance a plate leaves -- so the tilt is worth carrying through exactly
+    rather than approximating it away.
+
+    Substituting ``p = origin + t * direction`` into the plane equation gives ``t`` in closed form; no
+    iteration, and it reduces to the horizontal case when ``a = b = 0``.
+
+    Raises:
+        RuntimeError: if the ray is (near-)parallel to the plane, or the plane is behind the camera.
+    """
     origin, direction = ray
     if abs(direction[2]) < 0.2:  # more than ~78 degrees off vertical
         raise RuntimeError(
             "The line of sight is almost horizontal, so it barely crosses the table plane and the "
             "projected position would be meaningless. Use viewpoints that look down at the pile."
         )
-    distance = (z - origin[2]) / direction[2]
+
+    denominator = direction[2] - a * direction[0] - b * direction[1]
+    if abs(denominator) < 1e-9:
+        raise RuntimeError("The line of sight runs parallel to the table plane; it never crosses it.")
+    distance = (a * origin[0] + b * origin[1] + c - origin[2]) / denominator
     if distance <= 0:
         raise RuntimeError(
-            "The table plane lies behind the camera. Check --table-z and the hand-eye calibration."
+            "The table plane lies behind the camera. Check the table calibration and the hand-eye calibration."
         )
     return origin + distance * direction
 
@@ -197,10 +224,11 @@ def project_ray_onto_height(ray: Tuple[np.ndarray, np.ndarray], z: float) -> np.
 def measure_table_height(camera: RGBDCamera, X_base_camera: HomogeneousMatrixType) -> Optional[float]:
     """Height of the table in the base frame as the depth stream sees it, or ``None`` if it cannot.
 
-    The table is the largest flat surface in view, so rather than fitting a plane (which the pile of
-    bricks biases upward) this takes the mode of the height histogram: the tallest bin of a 2 mm
-    histogram over every measured height. Bricks, the gripper and stray depth spikes land in other
-    bins and cannot pull it.
+    The table is the lowest broad surface in view. A plain "largest histogram bin over all heights"
+    turned out too easy to hijack with a close wrist, a dense pile or another object occupying more
+    pixels than the bare tabletop, which can manufacture a fake table *above* the real one. So the
+    histogram is deliberately restricted to the lower third of the observed heights and the densest
+    2 mm band there is taken as the table.
 
     Used only as a cross-check on ``--table-z``. It goes through the same (mis-)calibrated camera pose
     as everything else, so it is not an independent measurement of the table -- but that is exactly
@@ -227,12 +255,55 @@ def measure_table_height(camera: RGBDCamera, X_base_camera: HomogeneousMatrixTyp
     points_camera = np.stack([(col[valid] - cx) * z / fx, (row[valid] - cy) * z / fy, z], axis=-1)
     heights = points_camera @ X_base_camera[:3, :3].T[:, 2] + X_base_camera[2, 3]
 
-    low, high = np.percentile(heights, [1.0, 99.0])
-    if high - low < 1e-3:
-        return float(np.median(heights))
-    counts, edges = np.histogram(heights, bins=max(4, int(round((high - low) / 0.002))), range=(low, high))
+    low = float(np.percentile(heights, 1.0))
+    lower_surface_high = float(np.percentile(heights, TABLE_LOWER_SURFACE_PERCENTILE))
+    lower_surface = heights[(heights >= low) & (heights <= lower_surface_high)]
+    if lower_surface.size < MIN_TABLE_DEPTH_POINTS // 5:
+        lower_surface = heights
+        lower_surface_high = float(np.percentile(heights, 99.0))
+    if lower_surface_high - low < 1e-3:
+        return float(np.median(lower_surface))
+    counts, edges = np.histogram(
+        lower_surface,
+        bins=max(4, int(round((lower_surface_high - low) / TABLE_HEIGHT_BIN_SIZE))),
+        range=(low, lower_surface_high),
+    )
     peak = int(np.argmax(counts))
-    return float(np.median(heights[(heights >= edges[peak]) & (heights <= edges[peak + 1])]))
+    band = lower_surface[(lower_surface >= edges[peak]) & (lower_surface <= edges[peak + 1])]
+    return float(np.median(band if band.size else lower_surface))
+
+
+def resolve_runtime_table_floor(table_z: float, measured: List[float]) -> float:
+    """Conservative per-run table floor, but only from depth evidence strong enough to trust.
+
+    A higher floor is safer only when it is still plausibly the *table*. In practice that means:
+
+    * it must not disagree wildly with ``--table-z``;
+    * if two views contribute, they must agree with each other to within a few millimetres;
+    * if only one view contributes, it may only tighten the floor by a few millimetres.
+
+    Anything looser than that is logged as a warning but not promoted into a hard stop.
+    """
+    trusted = [z for z in measured if abs(z - table_z) <= SUSPICIOUS_TABLE_DISAGREEMENT]
+    if not trusted:
+        return float(table_z)
+
+    tightening = max(trusted) - table_z
+    if len(trusted) >= 2:
+        spread = max(trusted) - min(trusted)
+        if spread > MAX_RUNTIME_FLOOR_VIEW_SPREAD:
+            logger.warning(
+                f"The depth table estimates disagree by {spread * 1000:.1f} mm, so they are not trusted as a hard "
+                "runtime floor. Keeping --table-z as the floor for this run."
+            )
+            return float(table_z)
+    if tightening > MAX_RUNTIME_FLOOR_TIGHTENING:
+        logger.warning(
+            f"The depth-based table floor would tighten --table-z by {tightening * 1000:.1f} mm, which is too "
+            "large to trust as the tabletop from these views. Keeping --table-z as the floor for this run."
+        )
+        return float(table_z)
+    return float(max([table_z, *trusted]))
 
 
 def capture_view_ray(
@@ -346,13 +417,11 @@ def out_of_reach_message(robot_type: str, position: np.ndarray, exception: Excep
 @click.option(
     "--table-z",
     type=float,
-    default=TABLE_Z,
-    show_default=True,
-    help="Height of the table's surface in the robot's base frame (metres). This is what the pregrasp "
-    "height is anchored to, so it is the one number that has to be right. It is NOT 0: the base frame's "
-    "z = 0 is the robot's mounting flange and the arm sits on a plate, so the tabletop is ~2.4 cm below "
-    "it -- the default is measured from the hand-eye calibration's own board images (see config.TABLE_Z). "
-    "The run prints what the depth stream makes of it.",
+    default=None,
+    help="Height of the table's surface in the robot's base frame (metres), overriding the measured "
+    "table plane. You should not normally need this: run `python src/calibrate_table.py` once and the "
+    "arm touches the table to measure it, tilt included. Passing a flat value here throws that tilt "
+    "away. Without either, it falls back to config.TABLE_Z, which is a guess.",
 )
 @click.option(
     "--brick-height",
@@ -430,6 +499,29 @@ def main(
             arm, camera, X_tcp_camera, view_configurations[1], joint_speed, "view 2"
         )
 
+        # Where the table is. The touched-off plane wins: the arm measured it by touching, so unlike
+        # anything the camera says it carries no hand-eye calibration error. --table-z overrides it
+        # (flat, so the tilt is lost), and config.TABLE_Z is the last resort.
+        table_plane = None if table_z is not None else load_table_plane()
+        if table_plane is not None:
+            plane_a, plane_b, plane_c = table_plane.a, table_plane.b, table_plane.c
+            logger.info(f"Using the {table_plane.describe()}.")
+        else:
+            plane_a = plane_b = 0.0
+            plane_c = table_z if table_z is not None else TABLE_Z
+            if table_z is not None:
+                logger.info(f"--table-z {table_z:+.4f} m given; using a level plane at that height.")
+            else:
+                logger.warning(
+                    f"The table has never been touched off, so this falls back to config.TABLE_Z={TABLE_Z:+.4f} m, "
+                    "which is a guess and was 19.6 mm out last time it was checked against the real table. Run "
+                    "`python src/calibrate_table.py` before grasping."
+                )
+
+        # The measurement below needs a scalar height to start from; take the plane under the middle
+        # of where the two cameras are looking, then let the exact tilted projection refine it.
+        table_z = float(plane_c + plane_a * view_1.X_base_camera[0, 3] + plane_b * view_1.X_base_camera[1, 3])
+
         # Which brick is this? Both views saw it, from 40 cm and in focus, which is the only place in
         # the whole pick where it *can* be measured -- by the pregrasp the camera is inside its own
         # blind zone. So the footprint is measured here and the part looked up here, and submodule_2
@@ -473,8 +565,11 @@ def main(
         # are projected onto (see the module docstring).
         brick_top_z = table_z + brick_height
 
-        # Cross-check first, because if it fires it explains everything that follows.
         measured = [z for z in (table_z_1, table_z_2) if z is not None]
+        trusted_measured = [z for z in measured if abs(z - table_z) <= SUSPICIOUS_TABLE_DISAGREEMENT]
+        runtime_safe_table_z = resolve_runtime_table_floor(table_z, measured)
+
+        # Cross-check first, because if it fires it explains everything that follows.
         if measured:
             measured_table_z = float(np.mean(measured))
             disagreement = measured_table_z - table_z
@@ -482,6 +577,13 @@ def main(
                 f"Depth sees the table at z={measured_table_z:.4f} m; --table-z says {table_z:.4f} m "
                 f"(difference {disagreement * 100:+.1f} cm)."
             )
+            if len(trusted_measured) != len(measured):
+                ignored = [z for z in measured if abs(z - table_z) > SUSPICIOUS_TABLE_DISAGREEMENT]
+                logger.warning(
+                    f"Ignoring suspicious depth table estimate(s) {', '.join(f'{z:.4f}' for z in ignored)} m for "
+                    f"the runtime floor because they disagree with --table-z={table_z:.4f} m by more than "
+                    f"{SUSPICIOUS_TABLE_DISAGREEMENT * 100:.0f} cm and are likely not the tabletop."
+                )
             if abs(disagreement) > SUSPICIOUS_TABLE_DISAGREEMENT:
                 logger.warning(
                     f"That is {abs(disagreement) * 100:.1f} cm apart, and nothing else in the chain can shift the "
@@ -492,23 +594,41 @@ def main(
                     "10-20 board poses instead of 3 is the fix for the second case. The pregrasp *height* below "
                     "is unaffected either way: it is anchored to --table-z, not to the camera."
                 )
+            logger.info(
+                f"submodule_2 will enforce a runtime TCP floor from z={runtime_safe_table_z:.4f} m upward: the "
+                "highest depth estimate from this run that remained consistent enough to trust as the tabletop."
+            )
         else:
             logger.warning(
                 "No usable depth in either view, so the table height could not be cross-checked; trusting "
                 f"--table-z={table_z:.4f} m outright."
             )
+            logger.warning(
+                "Without a depth-based table measurement this run cannot add a tighter runtime floor; "
+                "submodule_2 will fall back to the configured table height only."
+            )
 
         # Each view's own answer for where the brick is. Their disagreement replaces the triangulation
         # gap as the quality metric, and measures the same thing more usefully: how far apart the two
         # views put the *brick*, in the plane the grasp happens in.
+        # Projected onto the *tilted* table plane raised by one brick height, so a table that is not
+        # exactly square to the robot's base is followed rather than averaged away.
         try:
-            point_1 = project_ray_onto_height(ray_1, brick_top_z)
-            point_2 = project_ray_onto_height(ray_2, brick_top_z)
+            point_1 = project_ray_onto_plane(ray_1, plane_a, plane_b, plane_c + brick_height)
+            point_2 = project_ray_onto_plane(ray_2, plane_a, plane_b, plane_c + brick_height)
         except RuntimeError as exception:
             logger.error(str(exception))
             os._exit(1)
 
         point = 0.5 * (point_1 + point_2)
+        # Now that the brick's x, y is known, the table height *under it* is the one that matters --
+        # which is what submodule_2's floor and the handoff below should carry, not the value from
+        # wherever the plane happened to be sampled earlier.
+        table_z = float(plane_c + plane_a * point[0] + plane_b * point[1])
+        brick_top_z = table_z + brick_height
+        # Re-derive the depth-based floor against that refined height, so the number handed to
+        # submodule_2 describes the table under the brick rather than under the camera.
+        runtime_safe_table_z = resolve_runtime_table_floor(table_z, measured)
         view_disagreement = float(np.linalg.norm(point_1 - point_2))
         logger.info(
             f"View 1 puts the brick at {point_1.round(4)} m, view 2 at {point_2.round(4)} m; "
@@ -572,9 +692,18 @@ def main(
 
         # Written before the move rather than after: if the move fails or is interrupted, the file
         # still describes the brick at a position that no longer matches where the arm is standing,
-        # and submodule_2's position check will refuse it -- which is the correct outcome.
-        if brick is not None and brick.part is not None:
-            write_handoff(BRICK_HANDOFF_PATH, brick, brick_position=point[:2])
+        # and submodule_2's position check will refuse it -- which is the correct outcome. The
+        # runtime table floor is carried even when the part could not be identified, because the
+        # descent limit still matters in that case.
+        write_handoff(
+            BRICK_HANDOFF_PATH,
+            brick_position=point[:2],
+            brick=brick,
+            height=brick_height,
+            configured_table_z=table_z,
+            measured_table_zs=measured,
+            safe_table_z=runtime_safe_table_z,
+        )
 
         input(f"about to move to the pregrasp at {X_base_pregrasp[:3, 3].round(3)} m (base frame), press enter to continue")
         try:

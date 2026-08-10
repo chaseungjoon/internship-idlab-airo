@@ -8,6 +8,8 @@ import contextlib
 import glob
 import json
 import os
+import time
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Dict, Iterator, Optional, Tuple
 
 import numpy as np
@@ -38,13 +40,14 @@ DEFAULT_CAMERA_RESOLUTION = "720"
 DEFAULT_CALIBRATION_DIR = "/home/joon/int2026/calibration_dir"
 
 # --- Table height relative to base -----------------------------------------------------------------------------------------
-TABLE_Z = -0.024
+TABLE_Z = -0.0044
+
+TABLE_PLANE_PATH = os.path.normpath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "run", "table_plane.json")
+)
+TABLE_PLANE_MAX_AGE = 7 * 24 * 3600.0
 
 # --- the brick -----------------------------------------------------------------------------------------
-# Fallbacks only. The pile holds ~66 part numbers, so the brick being picked is not known in advance:
-# submodule_1 measures its footprint and looks it up in lego_catalog (built from lego_3d/meshes), then
-# hands the real dimensions to submodule_2. These apply only when that is unavailable -- no handoff
-# file, a stale one, or --no-measure-brick -- and describe BrickLink 3622 "Brick 1 x 3".
 FALLBACK_BRICK_HEIGHT = 0.0096
 FALLBACK_BRICK_WIDTH = 0.0078
 FALLBACK_BRICK_LENGTH = 0.0238
@@ -60,6 +63,90 @@ PREGRASP_HEIGHT = 0.03
 # --- top-down tool orientation ---------------------------------------------------------------------------
 HOVER_ORIENTATION_EULER = np.array([0, np.pi, 0.0001])
 HOVER_YAW_CANDIDATES = np.linspace(0, 2 * np.pi, 8, endpoint=False)
+
+
+# =================================================================================================
+# the table, as measured by touching it
+# =================================================================================================
+
+
+@dataclass(frozen=True)
+class TablePlane:
+    """The tabletop as ``z = a*x + b*y + c`` in the robot's base frame, from calibrate_table.py.
+
+    A plane rather than a single height because the table is not exactly perpendicular to the robot's
+    z axis. A tilt of only 1 degree is 7 mm across a 40 cm workspace -- comfortably more than the
+    1.5 mm of fingertip clearance a plate leaves, so a single number that is right in the middle of
+    the table is wrong at its edges.
+    """
+
+    a: float
+    b: float
+    c: float
+    residual: float  # metres, worst |touched z - fitted z| over the samples
+    n_samples: int
+    measured_at: float  # unix time
+    tcp_offset: Optional[Tuple[float, ...]] = None  # the arm's TCP offset when it was measured
+
+    def z_at(self, x: float, y: float) -> float:
+        return self.a * x + self.b * y + self.c
+
+    @property
+    def tilt_deg(self) -> float:
+        return float(np.degrees(np.arctan(np.hypot(self.a, self.b))))
+
+    def describe(self) -> str:
+        age_hours = (time.time() - self.measured_at) / 3600.0
+        return (
+            f"table plane from {self.n_samples} touch point(s), {age_hours:.1f} h old: "
+            f"z = {self.c:+.4f} m at the base axis, tilted {self.tilt_deg:.2f} deg, "
+            f"worst residual {self.residual * 1000:.1f} mm"
+        )
+
+
+def load_table_plane(path: str = TABLE_PLANE_PATH, warn_if_old: bool = True) -> Optional[TablePlane]:
+    """The measured table plane, or ``None`` if the table has never been touched off."""
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path) as f:
+            payload = json.load(f)
+        plane = TablePlane(
+            a=float(payload["a"]),
+            b=float(payload["b"]),
+            c=float(payload["c"]),
+            residual=float(payload["residual"]),
+            n_samples=int(payload["n_samples"]),
+            measured_at=float(payload["measured_at"]),
+            tcp_offset=tuple(payload["tcp_offset"]) if payload.get("tcp_offset") else None,
+        )
+    except (OSError, ValueError, KeyError) as exception:
+        logger.warning(f"Could not read the table plane at {path}: {exception}")
+        return None
+
+    if warn_if_old and time.time() - plane.measured_at > TABLE_PLANE_MAX_AGE:
+        logger.warning(
+            f"The table plane at {path} is {(time.time() - plane.measured_at) / 86400:.1f} days old. If the table "
+            "or the gripper has been touched since, re-run `python src/calibrate_table.py`."
+        )
+    return plane
+
+
+def table_z_at(x: float, y: float, plane: Optional[TablePlane] = None) -> float:
+    """Height of the tabletop under ``(x, y)``, from the touch-off if there is one.
+
+    Falls back to :data:`TABLE_Z` with a warning, because that constant came from the camera and the
+    whole point of the touch-off is that the camera cannot measure this well enough to descend on.
+    """
+    if plane is None:
+        plane = load_table_plane()
+    if plane is None:
+        logger.warning(
+            f"No touched-off table plane at {TABLE_PLANE_PATH}; falling back to TABLE_Z={TABLE_Z:+.4f} m, which "
+            "is a guess. Run `python src/calibrate_table.py` to measure it."
+        )
+        return TABLE_Z
+    return plane.z_at(x, y)
 
 
 # =================================================================================================

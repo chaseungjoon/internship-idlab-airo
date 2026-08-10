@@ -521,28 +521,49 @@ def measure_brick(
 # =================================================================================================
 
 
-def write_handoff(path: str, brick: MeasuredBrick, brick_position: Sequence[float]) -> None:
-    """Record what submodule_1 measured, for submodule_2 to pick up.
+def write_handoff(
+    path: str,
+    brick_position: Sequence[float],
+    brick: Optional[MeasuredBrick] = None,
+    *,
+    width: Optional[float] = None,
+    height: Optional[float] = None,
+    configured_table_z: Optional[float] = None,
+    measured_table_zs: Sequence[float] = (),
+    safe_table_z: Optional[float] = None,
+) -> None:
+    
+    if brick is not None:
+        width = brick.width
+        height = brick.height
 
-    ``brick_position`` -- the brick's x, y in the base frame -- is stored alongside the dimensions
-    precisely so the reader can check the file is about the brick it is standing over. The arm's pose
-    is still the interface for *where* to grasp; this only answers *what* is being grasped.
-    """
     payload = {
         "written_at": time.time(),
-        "part_number": brick.part.number if brick.part else None,
-        "same_size_parts": list(brick.alternatives),
-        "width": brick.width,
-        "length": brick.length,
-        "height": brick.height,
-        "obstruction": brick.part.obstruction if brick.part else 0.0,
-        "long_axis_heading": brick.long_axis_heading,
-        "closing_heading": brick.closing_heading,
         "brick_position": [float(value) for value in brick_position],
-        "measured_width": brick.measured_width,
-        "measured_length": brick.measured_length,
-        "view_disagreement": brick.view_disagreement,
+        "table_z_measured_views": [float(value) for value in measured_table_zs],
     }
+    if configured_table_z is not None:
+        payload["table_z_configured"] = float(configured_table_z)
+    if safe_table_z is not None:
+        payload["safe_table_z"] = float(safe_table_z)
+    if width is not None:
+        payload["width"] = float(width)
+    if height is not None:
+        payload["height"] = float(height)
+    if brick is not None:
+        payload.update(
+            {
+                "part_number": brick.part.number if brick.part else None,
+                "same_size_parts": list(brick.alternatives),
+                "length": brick.length,
+                "obstruction": brick.part.obstruction if brick.part else 0.0,
+                "long_axis_heading": brick.long_axis_heading,
+                "closing_heading": brick.closing_heading,
+                "measured_width": brick.measured_width,
+                "measured_length": brick.measured_length,
+                "view_disagreement": brick.view_disagreement,
+            }
+        )
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w") as f:
         json.dump(payload, f, indent=2)

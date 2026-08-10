@@ -35,6 +35,7 @@ from config import (
     SUPPORTED_ROBOT_TYPES,
     connect_arm,
     ensure_control_ready,
+    load_table_plane,
 )
 from m1.physical.brick_measure import read_handoff
 
@@ -88,6 +89,10 @@ CLOSING_AXIS_VECTORS = {"x": np.array([1.0, 0.0, 0.0]), "y": np.array([0.0, 1.0,
 DEFAULT_CLOSING_AXIS = "y"
 
 # --- sanity limits on the inherited pose ----------------------------------------------------------
+
+# Gap between the touched-off table and submodule_1's depth estimate worth flagging. It is the
+# hand-eye calibration's vertical error, so it is a diagnostic rather than a fault.
+TABLE_SOURCE_DISAGREEMENT = 0.003
 
 MAX_TILT_FROM_VERTICAL_DEG = 5.0  # a straight-down pregrasp should be well inside this
 MIN_BASE_DISTANCE = 0.15  # metres; closer to the base axis than this the arm is folded into itself
@@ -225,28 +230,46 @@ def resolve_brick(
     width_mm = FALLBACK_BRICK_WIDTH_MM
     height_mm = FALLBACK_BRICK_HEIGHT_MM
 
-    if handoff is not None:
-        width_mm = float(handoff["width"]) * 1000.0
-        height_mm = float(handoff["height"]) * 1000.0
-        closing_deg = math.degrees(float(handoff["closing_heading"]))
-        part = handoff.get("part_number")
-        same_size = handoff.get("same_size_parts") or []
-        also = f" (or {len(same_size)} other part(s) of the same size)" if same_size else ""
-        logger.info(
-            f"submodule_1 measured this brick as part {part}{also}: {width_mm:.1f} mm wide, "
-            f"{height_mm:.1f} mm tall, long axis at {math.degrees(float(handoff['long_axis_heading'])):.0f} deg."
-        )
-        if handoff.get("obstruction", 0.0) > 0:
-            logger.warning(
-                f"That part has {float(handoff['obstruction']) * 1000:.1f} mm of structure standing above the face "
-                "being grasped; the fingers may foul it on the way down."
-            )
-    else:
+    if handoff is None:
         logger.warning(
             f"Falling back to the 1x3 brick's {FALLBACK_BRICK_WIDTH_MM:.1f} x {FALLBACK_BRICK_HEIGHT_MM:.1f} mm. "
             "If the brick on the table is anything else, pass --brick-width-mm and --brick-height-mm, or re-run "
             "submodule_1 so it can measure it."
         )
+    else:
+        width_from_handoff = handoff.get("width")
+        height_from_handoff = handoff.get("height")
+        if width_from_handoff is not None:
+            width_mm = float(width_from_handoff) * 1000.0
+        if height_from_handoff is not None:
+            height_mm = float(height_from_handoff) * 1000.0
+
+        if handoff.get("closing_heading") is not None:
+            closing_deg = math.degrees(float(handoff["closing_heading"]))
+
+        part = handoff.get("part_number")
+        if part is not None and width_from_handoff is not None and height_from_handoff is not None:
+            same_size = handoff.get("same_size_parts") or []
+            also = f" (or {len(same_size)} other part(s) of the same size)" if same_size else ""
+            logger.info(
+                f"submodule_1 measured this brick as part {part}{also}: {width_mm:.1f} mm wide, "
+                f"{height_mm:.1f} mm tall, long axis at {math.degrees(float(handoff['long_axis_heading'])):.0f} deg."
+            )
+            if handoff.get("obstruction", 0.0) > 0:
+                logger.warning(
+                    f"That part has {float(handoff['obstruction']) * 1000:.1f} mm of structure standing above the face "
+                    "being grasped; the fingers may foul it on the way down."
+                )
+        elif width_from_handoff is not None or height_from_handoff is not None:
+            logger.info(
+                f"submodule_1 left dimensions for this run: width {width_mm:.1f} mm, height {height_mm:.1f} mm."
+            )
+        else:
+            logger.warning(
+                "submodule_1 left only the brick position and runtime table floor, not trustworthy dimensions; "
+                f"falling back to {FALLBACK_BRICK_WIDTH_MM:.1f} x {FALLBACK_BRICK_HEIGHT_MM:.1f} mm unless "
+                "overridden on the command line."
+            )
 
     if width_override_mm is not None:
         logger.info(f"--brick-width-mm {width_override_mm:.1f} overrides the {width_mm:.1f} mm above.")
@@ -257,34 +280,128 @@ def resolve_brick(
     return width_mm, height_mm, closing_deg
 
 
-def resolve_grasp_depth(requested_mm: Optional[float], brick_height_mm: float) -> float:
+def resolve_runtime_table_floor_z(pregrasp: PregraspPose, handoff: Optional[dict], brick_height_mm: float) -> float:
+    """Table surface height to treat as a hard floor for this run, best source first.
+
+    Three sources, in descending order of how much they can be trusted:
+
+    1. **The touched-off plane** from ``calibrate_table.py``, evaluated under this grasp's x, y. The
+       arm physically touched the tabletop to make it, so no camera, no hand-eye calibration and no
+       brick-height assumption are involved -- only forward kinematics and the TCP offset.
+    2. **submodule_1's depth estimate**, carried in the handoff. It sees the table directly but
+       through the eye-in-hand camera pose, so it inherits the hand-eye calibration's error along the
+       view direction. That error is what drove the fingertips into the table: the camera put the
+       tabletop at z = -0.0240 m where touching it found z = -0.0044 m.
+    3. **Inference** from the parked pregrasp minus the brick height, which assumes everything
+       upstream was right and therefore protects against nothing.
+
+    Where 1 and 2 are both available their disagreement is worth printing: it *is* the hand-eye
+    calibration's vertical error, measured, and it is the number to watch after a re-calibration.
+    """
+    inferred_table_z = float(pregrasp.brick_top_z - brick_height_mm / 1000.0)
+    depth_table_z = float(handoff["safe_table_z"]) if handoff and handoff.get("safe_table_z") is not None else None
+
+    plane = load_table_plane()
+    if plane is not None:
+        touched_table_z = plane.z_at(float(pregrasp.position[0]), float(pregrasp.position[1]))
+        logger.info(
+            f"Table floor z={touched_table_z:.4f} m under this grasp, from the {plane.describe()}."
+        )
+        if depth_table_z is not None and abs(depth_table_z - touched_table_z) > TABLE_SOURCE_DISAGREEMENT:
+            logger.warning(
+                f"submodule_1's depth put the table at z={depth_table_z:.4f} m, "
+                f"{(depth_table_z - touched_table_z) * 1000:+.1f} mm from where the arm touched it. That gap is the "
+                "hand-eye calibration's vertical error; the touched value is used. Re-run the hand-eye "
+                "calibration with more board poses to close it."
+            )
+        if touched_table_z > inferred_table_z + 1e-6:
+            logger.warning(
+                f"The touched table is {1000.0 * (touched_table_z - inferred_table_z):.1f} mm above what the parked "
+                "pregrasp and the brick height imply, so it will tighten the allowed descent."
+            )
+        return touched_table_z
+
+    logger.warning(
+        "The table has never been touched off, so the floor below falls back to the camera. Run "
+        "`python src/calibrate_table.py` -- it is the difference between a floor that is measured and one that "
+        "inherits the hand-eye calibration's error."
+    )
+    if depth_table_z is None:
+        logger.warning(
+            f"No per-run table floor was handed off either, so the table is inferred at z={inferred_table_z:.4f} m "
+            "from the parked pregrasp and the assumed brick height. That adds no protection at all."
+        )
+        return inferred_table_z
+
+    configured_table_z = handoff.get("table_z_configured")
+    measured_views = handoff.get("table_z_measured_views") or []
+    logger.info(
+        f"Using submodule_1's runtime table floor z={depth_table_z:.4f} m"
+        + (
+            f" (configured {float(configured_table_z):.4f} m, depth views {', '.join(f'{float(z):.4f}' for z in measured_views)} m)."
+            if measured_views or configured_table_z is not None
+            else "."
+        )
+    )
+    if depth_table_z > inferred_table_z + 1e-6:
+        logger.warning(
+            f"That floor is {1000.0 * (depth_table_z - inferred_table_z):.1f} mm above what the parked pregrasp "
+            "and the brick height imply, so it will tighten the allowed descent for safety."
+        )
+    return depth_table_z
+
+
+def resolve_grasp_depth(
+    requested_mm: Optional[float], brick_height_mm: float, brick_top_z: float, table_floor_z: float
+) -> float:
     """How far below the top face to descend, capped for the part actually being grasped.
 
     The cap used to be a constant in the ``--grasp-depth-mm`` option's range, computed from the 1x3's
     9.6 mm. On a 3.2 mm plate that same 5 mm descent would drive the fingertips 1.8 mm *below* the
-    tabletop -- into the table, which jams the fingers and trips a protective stop. Now that the
-    brick's height is known per run, the cap is too.
+    tabletop -- into the table, which jams the fingers and trips a protective stop. Now there are two
+    per-run caps and the tighter one wins:
+
+    * the part geometry itself, which says how far the fingertips can descend into this brick;
+    * the runtime table floor from submodule_1, which says how low the TCP is allowed to go in this
+      run even if the parked pregrasp ended up lower than expected.
     """
-    ceiling = brick_height_mm - MIN_FINGERTIP_CLEARANCE_MM
+    geometric_ceiling = brick_height_mm - MIN_FINGERTIP_CLEARANCE_MM
+    runtime_ceiling = (brick_top_z - table_floor_z) * 1000.0 - MIN_FINGERTIP_CLEARANCE_MM
+    ceiling = min(geometric_ceiling, runtime_ceiling)
     if ceiling <= 0:
         raise click.ClickException(
-            f"A {brick_height_mm:.1f} mm part leaves no room to descend at all while keeping "
-            f"{MIN_FINGERTIP_CLEARANCE_MM:.1f} mm of fingertip clearance above the table. It is too thin for this "
-            "top-down grasp."
+            f"The brick top at z={brick_top_z:.4f} m and the runtime table floor at z={table_floor_z:.4f} m leave "
+            f"no room to descend while keeping {MIN_FINGERTIP_CLEARANCE_MM:.1f} mm of fingertip clearance above "
+            "the table. Re-run submodule_1; the parked pregrasp is already too low for a safe top-down grasp."
+        )
+    if runtime_ceiling < geometric_ceiling - 1e-6:
+        logger.warning(
+            f"The runtime table floor at z={table_floor_z:.4f} m tightens the descent cap from "
+            f"{geometric_ceiling:.1f} mm to {runtime_ceiling:.1f} mm."
         )
 
     depth = GRASP_DEPTH_MM if requested_mm is None else requested_mm
     if depth > ceiling:
         logger.warning(
-            f"A {depth:.1f} mm descent into a {brick_height_mm:.1f} mm part would put the fingertips "
-            f"{depth - brick_height_mm:.1f} mm below the tabletop; capping it at {ceiling:.1f} mm."
+            f"A {depth:.1f} mm descent would cross the runtime table limit; capping it at {ceiling:.1f} mm."
         )
         depth = ceiling
     logger.info(
-        f"Descending {depth:.1f} mm into the part's {brick_height_mm:.1f} mm, leaving "
-        f"{brick_height_mm - depth:.1f} mm of fingertip clearance above the table."
+        f"Descending {depth:.1f} mm into the part's {brick_height_mm:.1f} mm, leaving at least "
+        f"{brick_top_z - table_floor_z - depth / 1000.0:.4f} m between the TCP and the runtime table floor."
     )
     return depth
+
+
+def ensure_pose_above_table_floor(name: str, pose: HomogeneousMatrixType, table_floor_z: float) -> None:
+    """Reject any commanded TCP pose that would cross the runtime table floor."""
+    min_tcp_z = table_floor_z + MIN_FINGERTIP_CLEARANCE_MM / 1000.0
+    if pose[2, 3] < min_tcp_z - 1e-6:
+        raise click.ClickException(
+            f"{name} would command the TCP to z={pose[2, 3]:.4f} m, below the runtime floor of "
+            f"z={min_tcp_z:.4f} m (table {table_floor_z:.4f} m + {MIN_FINGERTIP_CLEARANCE_MM:.1f} mm "
+            "clearance). Refusing to descend."
+        )
 
 
 def pose_is_reachable(arm: PositionManipulator, pose: HomogeneousMatrixType) -> bool:
@@ -525,6 +642,53 @@ def release_and_retreat(
         logger.warning(f"Could not retreat to the pregrasp after the failed grasp: {exception}")
 
 
+def descend(
+    arm: PositionManipulator, grasp_pose: HomogeneousMatrixType, linear_speed: float, contact_guard: bool
+) -> None:
+    """Move down to ``grasp_pose``, optionally stopping early if the tool touches something.
+
+    The descent is short and the fingers are open around the brick, so nothing *should* be touched on
+    the way down -- which makes contact a reliable signal that something is wrong: the table is higher
+    than the calibration says, or the brick is sitting on another brick. With ``--contact-guard`` the
+    UR's own contact detection is armed downward for the move, and the arm stops itself instead of
+    leaning on whatever it found.
+
+    Off by default. The measured table plane is what stops the arm reaching the tabletop at all, and
+    this is a second line of defence rather than a substitute for it; force detection on a UR3e at
+    these speeds can also fire on nothing, and a false trigger costs a grasp.
+    """
+    if not contact_guard:
+        arm.move_linear_to_tcp_pose(grasp_pose, linear_speed=linear_speed).wait()
+        return
+
+    rtde_control = getattr(arm, "rtde_control", None)
+    if rtde_control is None or not hasattr(rtde_control, "startContactDetection"):
+        logger.warning("--contact-guard was asked for but this driver has no contact detection; descending without it.")
+        arm.move_linear_to_tcp_pose(grasp_pose, linear_speed=linear_speed).wait()
+        return
+
+    target_z = float(grasp_pose[2, 3])
+    rtde_control.startContactDetection([0.0, 0.0, -1.0, 0.0, 0.0, 0.0])
+    try:
+        action = arm.move_linear_to_tcp_pose(grasp_pose, linear_speed=linear_speed)
+        while not action.is_action_done():
+            if rtde_control.readContactDetection():
+                with contextlib.suppress(Exception):
+                    rtde_control.stopL(2.0)
+                stopped_z = float(arm.get_tcp_pose()[2, 3])
+                raise RuntimeError(
+                    f"The tool touched something at z={stopped_z:+.4f} m while descending to z={target_z:+.4f} m, "
+                    f"{(stopped_z - target_z) * 1000:.1f} mm early. Nothing should be in the way over an open "
+                    "gripper, so either the table is higher here than the touch-off says (re-run "
+                    "`python src/calibrate_table.py`) or this brick is resting on another one."
+                )
+            time.sleep(0.02)
+        action.wait()
+    finally:
+        with contextlib.suppress(Exception):
+            rtde_control.stopContactDetection()
+
+
 def grasp_and_lift(
     arm: PositionManipulator,
     gripper: ParallelPositionGripper,
@@ -533,6 +697,7 @@ def grasp_and_lift(
     lift_pose: HomogeneousMatrixType,
     brick_width_mm: float,
     linear_speed: float,
+    contact_guard: bool = False,
 ) -> Tuple[bool, str]:
     """Open, descend, close, verify, lift, verify again. Returns ``(success, reason)``.
 
@@ -555,7 +720,7 @@ def grasp_and_lift(
 
     descent_mm = (pregrasp_pose[2, 3] - grasp_pose[2, 3]) * 1000.0
     logger.info(f"Descending {descent_mm:.1f} mm onto the brick.")
-    arm.move_linear_to_tcp_pose(grasp_pose, linear_speed=linear_speed).wait()
+    descend(arm, grasp_pose, linear_speed, contact_guard)
 
     # A close that stalls on the brick is a *success*, not a timeout: the Robotiq's own
     # object-detection flag ends the wait, and check_grasp below decides what it closed on.
@@ -688,6 +853,13 @@ def stop_arm(arm: PositionManipulator) -> None:
     help="Report the inherited pose and the planned grasp, then stop without moving or gripping. The "
     "way to check the descent and the finger direction before letting the arm touch the pile.",
 )
+@click.option(
+    "--contact-guard",
+    is_flag=True,
+    help="Arm the UR's contact detection during the descent, so the arm stops itself if the tool "
+    "touches anything before reaching the grasp. A second line of defence behind the touched-off "
+    "table plane; off by default because a false trigger costs a grasp.",
+)
 @click.option("--yes", "-y", is_flag=True, help="Skip the confirmation prompt before descending.")
 def main(
     robot_type: str,
@@ -703,6 +875,7 @@ def main(
     brick_width_mm: Optional[float],
     brick_height_mm: Optional[float],
     handoff_path: str,
+    contact_guard: bool,
     dry_run: bool,
     yes: bool,
 ) -> None:
@@ -743,7 +916,10 @@ def main(
         brick_width_mm, brick_height_mm, handoff_closing_deg = resolve_brick(
             handoff, brick_width_mm, brick_height_mm
         )
-        grasp_depth_mm = resolve_grasp_depth(grasp_depth_mm, brick_height_mm)
+        table_floor_z = resolve_runtime_table_floor_z(pregrasp, handoff, brick_height_mm)
+        grasp_depth_mm = resolve_grasp_depth(
+            grasp_depth_mm, brick_height_mm, brick_top_z=pregrasp.brick_top_z, table_floor_z=table_floor_z
+        )
 
         requested_angle = requested_closing_angle(
             pregrasp, yaw_deg, yaw_offset_deg, measured_closing_deg=handoff_closing_deg
@@ -751,6 +927,11 @@ def main(
         grasp_position = np.array(
             [pregrasp.position[0], pregrasp.position[1], pregrasp.brick_top_z - grasp_depth_mm / 1000.0]
         )
+        if grasp_position[2] < table_floor_z + MIN_FINGERTIP_CLEARANCE_MM / 1000.0 - 1e-6:
+            raise click.ClickException(
+                f"The planned grasp at z={grasp_position[2]:.4f} m would cross the runtime table floor at "
+                f"z={table_floor_z:.4f} m. Re-run submodule_1; the parked pregrasp is too low."
+            )
 
         solved = reachable_yaw_pose(arm, grasp_position, requested_angle, closing_axis)
         if solved is None:
@@ -766,6 +947,8 @@ def main(
         # brick rather than sweeping sideways through it on the way down.
         aimed_pose = grasp_pose.copy()
         aimed_pose[2, 3] = pregrasp.position[2]
+        ensure_pose_above_table_floor("The re-aimed pregrasp", aimed_pose, table_floor_z)
+        ensure_pose_above_table_floor("The grasp pose", grasp_pose, table_floor_z)
 
         lift = reachable_lift_pose(arm, grasp_pose, lift_height)
         if lift is None:
@@ -774,6 +957,7 @@ def main(
                 "brick could be grasped and never raised. Re-run submodule_1 with the brick closer to the base."
             )
         lift_pose, actual_lift = lift
+        ensure_pose_above_table_floor("The lift pose", lift_pose, table_floor_z)
         if actual_lift < lift_height - 1e-9:
             logger.warning(
                 f"A {lift_height * 100:.0f} cm lift is out of reach here; lifting {actual_lift * 100:.0f} cm "
@@ -788,7 +972,7 @@ def main(
             f"Plan: turn the wrist to close along {math.degrees(actual_angle):.0f} deg, descend "
             f"{(pregrasp.position[2] - grasp_position[2]) * 1000:.1f} mm to z={grasp_position[2]:.4f} m "
             f"({grasp_depth_mm:.1f} mm into the brick, leaving "
-            f"{brick_height_mm - grasp_depth_mm:.1f} mm of fingertip clearance above the table), close on "
+            f"{1000.0 * (grasp_position[2] - table_floor_z):.1f} mm above the runtime table floor), close on "
             f"{brick_width_mm:.1f} mm, then lift {actual_lift * 100:.0f} cm to z={lift_pose[2, 3]:.4f} m."
         )
 
@@ -814,7 +998,7 @@ def main(
                     arm.move_to_tcp_pose(aimed_pose, joint_speed=joint_speed).wait()
 
                 success, reason = grasp_and_lift(
-                    arm, gripper, aimed_pose, grasp_pose, lift_pose, brick_width_mm, linear_speed
+                    arm, gripper, aimed_pose, grasp_pose, lift_pose, brick_width_mm, linear_speed, contact_guard
                 )
             except KeyboardInterrupt:
                 logger.warning("Interrupted; stopping the arm.")

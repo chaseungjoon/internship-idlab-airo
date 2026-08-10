@@ -1,22 +1,20 @@
-"""Measure the tabletop's height in the robot's base frame, from the hand-eye calibration's images.
+"""Cross-check the hand-eye calibration by measuring the board's plane from every sample.
 
-``config.TABLE_Z`` is the one number the whole pick is anchored to: submodule_1 projects the clicked
-rays onto the plane at ``TABLE_Z + brick height``, so an error in it lifts the pregrasp by that much
-and, on a line of sight that is not vertical, slides the target sideways as well. It is not zero --
-the base frame's z = 0 is the robot's mounting flange and the arm is bolted to the table through a
-plate -- so it has to be measured.
+SUPERSEDED for the table height: use ``calibrate_table.py``, which touches the tabletop with the arm.
+This script reaches the base frame *through* the hand-eye calibration, so it carries that
+calibration's error -- it put the tabletop at z = -0.0240 m where touching it found z = -0.0044 m, and
+that 19.6 mm drove the fingertips into the table on every grasp. What it is still good for is
+measuring that error: run both and compare.
 
-It already has been, by the calibration: the charuco board lies flat on this same table, and every
-calibration sample photographs it from a different arm pose. Mapping the detected board into the base
-frame with ``tcp_pose @ camera_pose_in_tcp @ board_pose_in_camera`` puts its surface at the table's
-height, once per sample. The board is a printed sheet lying directly on the tabletop, so its surface
-*is* the tabletop.
+Each calibration sample photographs the charuco board from a different arm pose, so mapping the
+detected board into the base frame with ``tcp_pose @ camera_pose_in_tcp @ board_pose_in_camera``
+should put its surface at the same height every time. Agreement across the samples is the thing to
+read: they look from genuinely different angles, so a consistent answer means the camera pose is
+consistent, while a spread of centimetres means the hand-eye calibration is inconsistent and needs
+more board poses.
 
-Agreement across the samples is the thing to read: they look from genuinely different angles, so a
-consistent answer means the camera pose is consistent too, while a spread of centimetres means the
-hand-eye calibration is the problem rather than the table.
-
-Run it after every re-calibration, and put the number it prints into ``config.TABLE_Z``::
+Note that the height it reports is the height of *whatever surface the board is lying on*. That is
+only the tabletop if the board is lying on the tabletop::
 
     python src/measure_table_z.py
     python src/measure_table_z.py --calibration-dir /path/to/other_calibration_dir
@@ -45,7 +43,7 @@ from loguru import logger
 _SRC_DIR = os.path.dirname(os.path.abspath(__file__))
 if _SRC_DIR not in sys.path:
     sys.path.insert(0, _SRC_DIR)
-from config import DEFAULT_CALIBRATION_DIR, TABLE_Z, load_camera_pose_in_tcp  # noqa: E402
+from config import DEFAULT_CALIBRATION_DIR, load_camera_pose_in_tcp, load_table_plane  # noqa: E402
 
 # Above this spread between samples, the samples are not describing one flat plane and the number
 # should not be trusted -- which points at the hand-eye calibration, not at the table.
@@ -111,7 +109,7 @@ def measure_table_z(calibration_dir: str) -> Tuple[Optional[float], List[Tuple[i
     help="The hand-eye-calibration output directory, holding data/ and results_n=*/.",
 )
 def main(calibration_dir: str) -> None:
-    """Measure config.TABLE_Z from a hand-eye calibration's board images."""
+    """Check a hand-eye calibration's consistency against the board plane it was computed from."""
     table_z, samples = measure_table_z(calibration_dir)
     if table_z is None:
         raise click.ClickException(
@@ -141,11 +139,29 @@ def main(calibration_dir: str) -> None:
     else:
         logger.success(f"The {len(samples)} samples agree to within {spread * 1000:.1f} mm.")
 
-    logger.info(f"config.TABLE_Z is currently {TABLE_Z:+.4f} m; this calibration measures {table_z:+.4f} m.")
-    if abs(table_z - TABLE_Z) > 0.001:
-        click.echo(f"\nUpdate src/config.py:\n\n    TABLE_Z = {table_z:.4f}\n")
-    else:
-        click.echo(f"\nconfig.TABLE_Z = {TABLE_Z:.4f} still matches this calibration; nothing to change.\n")
+    logger.info(f"The board's surface reads z={table_z:+.4f} m in the base frame through this calibration.")
+
+    plane = load_table_plane()
+    if plane is not None:
+        touched = plane.z_at(0.0, 0.0) if (plane.a == 0.0 and plane.b == 0.0) else None
+        logger.info(f"For comparison, the arm touched the table: {plane.describe()}.")
+        if touched is not None:
+            logger.info(
+                f"Camera-through-calibration says {table_z:+.4f} m, touching says {touched:+.4f} m -- "
+                f"a {abs(table_z - touched) * 1000:.1f} mm gap, which is this calibration's vertical error "
+                "*if* the board is lying on the same surface the arm touched."
+            )
+
+    click.echo(
+        "\nThis is a calibration cross-check, not the table height the pick uses.\n"
+        "  - It only equals the tabletop if the board is lying flat on the tabletop itself. If the board is\n"
+        "    taped to a panel, a wall or a riser, this number is that surface's height, not the table's.\n"
+        "  - It reaches the base frame through the hand-eye calibration, so it carries that calibration's\n"
+        "    error. That is why it is not used: it read -0.0240 m where the arm touched -0.0044 m.\n"
+        "\nFor the height the pick actually descends to, run:\n\n    python src/calibrate_table.py\n\n"
+        "which touches the tabletop with the arm and needs no camera at all. What agreement (or not) between\n"
+        "the two tells you is how far off the hand-eye calibration is vertically.\n"
+    )
 
 
 if __name__ == "__main__":
