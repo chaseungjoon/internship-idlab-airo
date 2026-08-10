@@ -1,44 +1,5 @@
-"""M1 submodule 2 (physical): grasp the brick under the pregrasp pose and hold it up.
-
-Second half of the two-step pick. :mod:`submodule_1` triangulates a hand-clicked point on a brick and
-leaves the TCP hovering ``submodule_1.PREGRASP_HEIGHT`` straight above it; this module starts from
-wherever the arm is standing *right now* and finishes the job::
-
-    read the current TCP pose  ->  (optionally re-aim the wrist yaw)  ->  open the gripper
-      ->  descend onto the brick  ->  close  ->  verify  ->  lift LIFT_HEIGHT straight up
-      ->  verify again, and keep holding
-
-Run order::
-
-    python submodule_1.py            # click the brick in both views, arm ends at the pregrasp
-    python submodule_2.py --yaw-deg 30   # grasp it and hold it up
-
-Because the two run as separate processes, the *arm's own pose is the interface* between them -- there
-is no file to pass and nothing to keep in sync but ``PREGRASP_HEIGHT``, which is imported from
-submodule_1 rather than copied. That does mean submodule_2 must be run while the arm is still parked
-where submodule_1 left it: move the arm in between (or freedrive it) and the geometry below is
-measuring from the wrong place. :func:`describe_pregrasp_pose` checks what it can -- that the tool
-still points straight down, and that the pose is in a plausible place -- and refuses to descend from a
-pose that fails those, since a tilted or arbitrary pose means submodule_1's output was lost.
-
-The depth to descend is known rather than measured: the clicked point is on the brick's *top face*, so
-the top face is exactly ``PREGRASP_HEIGHT`` below the current TCP, and the grasp sits ``--grasp-depth``
-below that. Nothing here uses the camera at all -- at 3 cm the RealSense is far inside its Min-Z blind
-zone and its RGB is out of focus, so there is nothing useful left to see from the pregrasp; the
-measurement was already made, in submodule_1, from where it could be made well.
-
-Hardware is the UR3e with the Robotiq 2F-85 adaptive gripper on the URCap socket (TCP port 63352 of
-the robot controller). Built on airo-mono only: ``airo-robots`` for the arm and the gripper,
-``airo-spatial-algebra`` for the pose maths.
-
-Wrist yaw
----------
-``submodule_1`` takes whatever yaw ``find_reachable_hover_orientation`` hands back -- it only needs *a*
-reachable straight-down pose, so the yaw it lands on has nothing to do with how the brick is lying. The
-fingers of a 2F-85 have to close *across* a 1x3 brick's 7.8 mm width, so pass ``--yaw-deg`` with the
-direction (in the base frame, degrees) you want the fingers to close along, or ``--yaw-offset-deg`` to
-nudge the yaw submodule_1 left. With neither, the current yaw is kept and the run says what direction
-that has the fingers closing along, so the number to pass next time is in the log.
+"""
+m1 submodule 2 (physical): grasp the brick under the pregrasp pose and hold it up.
 """
 
 import contextlib
@@ -51,6 +12,7 @@ from typing import Iterator, Optional, Tuple
 
 import click
 import numpy as np
+from airo_robots.awaitable_action import ACTION_STATUS_ENUM
 from airo_robots.exceptions import RobotConfigurationException
 from airo_robots.grippers.parallel_position_gripper import ParallelPositionGripper
 from airo_robots.manipulators.position_manipulator import PositionManipulator
@@ -58,37 +20,37 @@ from airo_spatial_algebra import SE3Container
 from airo_typing import HomogeneousMatrixType
 from loguru import logger
 
-# submodule_2 lives next to submodule_0 and submodule_1; config.py (the shared robot/camera/
-# calibration constants) lives two levels up, at the top of src/.
-_PHYSICAL_DIR = os.path.dirname(os.path.abspath(__file__))
-_SRC_DIR = os.path.normpath(os.path.join(_PHYSICAL_DIR, "..", ".."))
-for _path in (_PHYSICAL_DIR, _SRC_DIR):
-    if _path not in sys.path:
-        sys.path.insert(0, _path)
+_SRC_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+if _SRC_DIR not in sys.path:
+    sys.path.insert(0, _SRC_DIR)
 from config import (
     APPROX_ARM_REACH,
+    BRICK_HANDOFF_MAX_AGE,
+    BRICK_HANDOFF_PATH,
     DEFAULT_IP_ADDRESSES,
     DEFAULT_REALMAN_PORT,
-    SUPPORTED_ROBOT_TYPES,
-)
-from submodule_0 import connect_arm
-from submodule_1 import (
+    FALLBACK_BRICK_HEIGHT,
+    FALLBACK_BRICK_WIDTH,
     PREGRASP_HEIGHT,
+    SUPPORTED_ROBOT_TYPES,
+    connect_arm,
     ensure_control_ready,
 )
+from m1.physical.brick_measure import read_handoff
 
 # --- the brick, and how to pinch it ---------------------------------------------------------------
 
-# BrickLink 3622 "Brick 1 x 3" in Dark Bluish Gray: 3 x 8 - 0.2 = 23.8 mm long, 1 x 8 - 0.2 = 7.8 mm
-# wide, and 9.6 mm tall because it is a brick rather than a plate. The width is what the fingers close
-# on and what the grasp is verified against; the height bounds how far it is safe to descend.
-BRICK_WIDTH_MM = 7.8
-BRICK_HEIGHT_MM = 9.6
+# Fallbacks for when submodule_1's handoff is missing or stale (see config.FALLBACK_BRICK_*). The
+# real dimensions come from the handoff: submodule_1 measures the clicked brick's footprint from both
+# viewpoints and identifies the part, because the pile holds ~66 part numbers and only one of them is
+# the 1x3 these describe. Everything about the gripper below is in millimetres, so convert once here.
+FALLBACK_BRICK_WIDTH_MM = FALLBACK_BRICK_WIDTH * 1000.0
+FALLBACK_BRICK_HEIGHT_MM = FALLBACK_BRICK_HEIGHT * 1000.0
 
 # How far below the brick's top face the TCP is driven before closing. Roughly half a brick height puts
 # the finger pads on the brick's walls -- not on the studs, which would slip, and not on the table,
 # which would jam the fingers and can trip a protective stop.
-GRASP_DEPTH_MM = 5.0
+GRASP_DEPTH_MM = 3.0
 # Hard cap on that descent, so no combination of options can drive the fingertips into the table: the
 # clicked point is on the top face, and the table is one brick height below it.
 MIN_FINGERTIP_CLEARANCE_MM = 1.5
@@ -108,6 +70,13 @@ GRIPPER_SQUEEZE_MM = 3.0  # commanded *below* the brick width, so the gripper st
 GRIPPER_FORCE = 50.0  # newtons; ample for a 1 g brick, gentle enough not to mark it
 GRIPPER_SPEED = 0.05  # m/s, slow enough that a mistimed close nudges the pile rather than flicking it
 GRIPPER_MAX_STROKE = 0.085  # metres, the 2F-85's full opening
+# A 2F-85 crosses its whole 85 mm stroke in a couple of seconds even at the slow speed above, so a
+# move that is still unfinished after this is stuck rather than slow, and there is no reason to sit
+# through the driver's 30 s default before saying so.
+GRIPPER_MOVE_TIMEOUT = 8.0
+# Finger travel under which we call a move "the gripper never moved" rather than "it stopped early on
+# something". Comfortably above the ~0.4 mm register quantisation, far below a real grasp's travel.
+GRIPPER_STALL_TOLERANCE_MM = 2.0
 
 # Verification band on the finger width after closing. Under the lower bound the fingers met with
 # nothing between them; over the upper bound something much thicker than the brick is in the grip.
@@ -212,16 +181,110 @@ def describe_pregrasp_pose(arm: PositionManipulator, robot_type: str, closing_ax
     return PregraspPose(pose=pose, tilt_deg=tilt_deg, closing_angle=finger_direction(pose, closing_axis))
 
 
-def requested_closing_angle(pregrasp: PregraspPose, yaw_deg: Optional[float], yaw_offset_deg: float) -> float:
-    """The base-frame direction the fingers should close along, from the CLI options.
+def requested_closing_angle(
+    pregrasp: PregraspPose,
+    yaw_deg: Optional[float],
+    yaw_offset_deg: float,
+    measured_closing_deg: Optional[float] = None,
+) -> float:
+    """The base-frame direction the fingers should close along.
 
-    ``submodule_1`` picks its yaw purely for reachability, so what it left is unrelated to how the
-    brick lies. ``--yaw-deg`` sets the closing direction outright; ``--yaw-offset-deg`` turns whatever
-    the starting point is. Only the *orientation* is ever changed -- the grasp position is rebuilt from
-    the pregrasp's x and y, so re-aiming can never shift the TCP off the brick.
+    ``submodule_1`` picks the pregrasp's yaw purely for reachability, so what it left is unrelated to
+    how the brick lies -- which is why this used to need ``--yaw-deg`` supplied by hand, guessed by
+    eye. It no longer does: submodule_1 now measures the brick's long axis, and the handoff carries
+    the direction square to it, which is the direction a parallel jaw has to close along. Precedence
+    is ``--yaw-deg`` (an explicit instruction wins), then the measurement, then the inherited yaw.
+
+    Only the *orientation* is ever changed -- the grasp position is rebuilt from the pregrasp's x and
+    y, so re-aiming can never shift the TCP off the brick.
     """
-    base_angle = math.radians(yaw_deg) if yaw_deg is not None else pregrasp.closing_angle
+    if yaw_deg is not None:
+        base_angle = math.radians(yaw_deg)
+    elif measured_closing_deg is not None:
+        base_angle = math.radians(measured_closing_deg)
+        logger.info(f"Closing along {measured_closing_deg:.0f} deg, square to the brick's measured long axis.")
+    else:
+        base_angle = pregrasp.closing_angle
+        logger.warning(
+            "No measured brick orientation and no --yaw-deg, so the fingers keep the yaw submodule_1 happened "
+            f"to land on ({math.degrees(pregrasp.closing_angle):.0f} deg), which was chosen for reachability and "
+            "has nothing to do with how the brick lies. Expect to have to pass --yaw-deg."
+        )
     return base_angle + math.radians(yaw_offset_deg)
+
+
+def resolve_brick(
+    handoff: Optional[dict], width_override_mm: Optional[float], height_override_mm: Optional[float]
+) -> Tuple[float, float, Optional[float]]:
+    """Settle on the brick's width, height and closing direction, in that order of authority.
+
+    An explicit CLI value wins, then submodule_1's measurement, then the 1x3 fallback. Returns
+    ``(width_mm, height_mm, closing_heading_deg or None)``.
+    """
+    closing_deg = None
+    width_mm = FALLBACK_BRICK_WIDTH_MM
+    height_mm = FALLBACK_BRICK_HEIGHT_MM
+
+    if handoff is not None:
+        width_mm = float(handoff["width"]) * 1000.0
+        height_mm = float(handoff["height"]) * 1000.0
+        closing_deg = math.degrees(float(handoff["closing_heading"]))
+        part = handoff.get("part_number")
+        same_size = handoff.get("same_size_parts") or []
+        also = f" (or {len(same_size)} other part(s) of the same size)" if same_size else ""
+        logger.info(
+            f"submodule_1 measured this brick as part {part}{also}: {width_mm:.1f} mm wide, "
+            f"{height_mm:.1f} mm tall, long axis at {math.degrees(float(handoff['long_axis_heading'])):.0f} deg."
+        )
+        if handoff.get("obstruction", 0.0) > 0:
+            logger.warning(
+                f"That part has {float(handoff['obstruction']) * 1000:.1f} mm of structure standing above the face "
+                "being grasped; the fingers may foul it on the way down."
+            )
+    else:
+        logger.warning(
+            f"Falling back to the 1x3 brick's {FALLBACK_BRICK_WIDTH_MM:.1f} x {FALLBACK_BRICK_HEIGHT_MM:.1f} mm. "
+            "If the brick on the table is anything else, pass --brick-width-mm and --brick-height-mm, or re-run "
+            "submodule_1 so it can measure it."
+        )
+
+    if width_override_mm is not None:
+        logger.info(f"--brick-width-mm {width_override_mm:.1f} overrides the {width_mm:.1f} mm above.")
+        width_mm = width_override_mm
+    if height_override_mm is not None:
+        logger.info(f"--brick-height-mm {height_override_mm:.1f} overrides the {height_mm:.1f} mm above.")
+        height_mm = height_override_mm
+    return width_mm, height_mm, closing_deg
+
+
+def resolve_grasp_depth(requested_mm: Optional[float], brick_height_mm: float) -> float:
+    """How far below the top face to descend, capped for the part actually being grasped.
+
+    The cap used to be a constant in the ``--grasp-depth-mm`` option's range, computed from the 1x3's
+    9.6 mm. On a 3.2 mm plate that same 5 mm descent would drive the fingertips 1.8 mm *below* the
+    tabletop -- into the table, which jams the fingers and trips a protective stop. Now that the
+    brick's height is known per run, the cap is too.
+    """
+    ceiling = brick_height_mm - MIN_FINGERTIP_CLEARANCE_MM
+    if ceiling <= 0:
+        raise click.ClickException(
+            f"A {brick_height_mm:.1f} mm part leaves no room to descend at all while keeping "
+            f"{MIN_FINGERTIP_CLEARANCE_MM:.1f} mm of fingertip clearance above the table. It is too thin for this "
+            "top-down grasp."
+        )
+
+    depth = GRASP_DEPTH_MM if requested_mm is None else requested_mm
+    if depth > ceiling:
+        logger.warning(
+            f"A {depth:.1f} mm descent into a {brick_height_mm:.1f} mm part would put the fingertips "
+            f"{depth - brick_height_mm:.1f} mm below the tabletop; capping it at {ceiling:.1f} mm."
+        )
+        depth = ceiling
+    logger.info(
+        f"Descending {depth:.1f} mm into the part's {brick_height_mm:.1f} mm, leaving "
+        f"{brick_height_mm - depth:.1f} mm of fingertip clearance above the table."
+    )
+    return depth
 
 
 def pose_is_reachable(arm: PositionManipulator, pose: HomogeneousMatrixType) -> bool:
@@ -307,14 +370,62 @@ def reachable_yaw_pose(
 # =================================================================================================
 
 
+def _arm_gripper_for_motion(gripper: ParallelPositionGripper) -> None:
+    """Make sure the gripper will actually *move* when it is told to, and say so if it will not.
+
+    A Robotiq only moves when three things hold: it is activated (``ACT``/``STA``), it is faultless
+    (``FLT``), and its go-to bit (``GTO``) is set. Register writes are accepted regardless -- ``SET
+    POS`` succeeds and ``GET PRE`` reads the new target back -- so a gripper with ``GTO`` clear looks
+    completely healthy right up until the fingers silently don't move.
+
+    ``Robotiq2F85.__init__`` only sets ``GTO`` inside ``_activate_gripper``, and only calls that when
+    the gripper is *not* already activated. A gripper left activated but with ``GTO`` cleared -- which
+    is how a stopped Polyscope program or an aborted previous run leaves it -- therefore connects
+    cleanly, reports its width, accepts every command, and never moves: every ``move(...).wait()``
+    burns its full 30 s timeout and the grasp is then reported as "no object between the fingers" at
+    the original opening width. That is exactly the failure this function exists to prevent.
+    """
+    # Every register read below is parsed defensively: an unreadable or unexpected reply from an older
+    # URCap must not become a hard failure on a gripper that would have worked fine.
+    def read_register(name: str) -> Optional[int]:
+        try:
+            value = gripper._communicate(f"GET {name}").split(" ")[-1]
+            return int(value)
+        except Exception as exception:  # noqa: BLE001 - a diagnostic read is never worth aborting on
+            logger.debug(f"Could not read the gripper's {name} register: {exception}")
+            return None
+
+    fault = read_register("FLT")
+    if fault:
+        raise RuntimeError(
+            f"The Robotiq reports fault status FLT {fault}. It will accept commands but not move. Clear the "
+            "fault from the Robotiq URCap toolbar on the teach pendant (re-activate the gripper), then re-run. "
+            "Common causes: an activation that never completed, or the fingers being blocked at power-up."
+        )
+
+    if not gripper.gripper_is_active():
+        logger.warning("The gripper is not activated; activating it now (the fingers will open and close once).")
+        gripper._activate_gripper()
+
+    # Set GTO unconditionally: it is the bit that turns an accepted target into motion, and the driver
+    # only sets it on the activation path we may well have just skipped.
+    gripper._communicate("SET GTO 1")
+    if read_register("GTO") == 0:
+        raise RuntimeError(
+            "Could not set the gripper's GTO (go-to) bit, so it would accept move commands without moving. "
+            "Check that the Robotiq URCap is running and the robot is in remote control."
+        )
+
+
 @contextlib.contextmanager
 def connect_gripper(robot_ip: str) -> Iterator[ParallelPositionGripper]:
-    """Yield a connected Robotiq 2F-85.
+    """Yield a connected, activated Robotiq 2F-85 that is armed to move.
 
     The gripper is reached through the UR controller's URCap socket on the *robot's* IP, so it needs
     no address of its own. A failure here is almost always the URCap not running or the robot not
     being in remote control, which the raised message says outright instead of leaving a bare socket
-    error.
+    error. :func:`_arm_gripper_for_motion` then checks the things that make a *connected* gripper
+    still refuse to move.
 
     Deliberately no "open on exit" teardown: the point of a successful run is that the brick is still
     held when the process ends. Releasing after a *failed* grasp is :func:`release_and_retreat`'s job,
@@ -331,8 +442,36 @@ def connect_gripper(robot_ip: str) -> Iterator[ParallelPositionGripper]:
             "Robotiq URCap is installed and running on the teach pendant, that the gripper moves from "
             f"Polyscope, and that the robot is in remote control. Original error: {exception}"
         ) from exception
-    logger.info(f"Gripper connected; currently {gripper.get_current_width() * 1000:.0f} mm open.")
+    _arm_gripper_for_motion(gripper)
+    logger.info(f"Gripper connected and armed; currently {gripper.get_current_width() * 1000:.0f} mm open.")
     yield gripper
+
+
+def move_gripper(
+    gripper: ParallelPositionGripper, width: float, description: str, timeout: float = GRIPPER_MOVE_TIMEOUT
+) -> None:
+    """Command the gripper to ``width`` and confirm the fingers actually went somewhere.
+
+    ``ParallelPositionGripper.move(...).wait()`` returns a status that nothing here used to look at,
+    and it warns rather than raises on timeout -- so a gripper that never moved produced a 30 s pause,
+    a ``UserWarning`` buried in the log, and then a grasp "failure" blamed on the brick. Comparing the
+    width before and after separates the two cases outright: fingers that did not move at all are a
+    gripper problem, fingers that moved and stopped early are (usually) an object.
+    """
+    width_before_mm = gripper.get_current_width() * 1000.0
+    logger.info(f"{description}: {width_before_mm:.1f} mm -> {width * 1000:.0f} mm.")
+
+    status = gripper.move(width, speed=GRIPPER_SPEED, force=GRIPPER_FORCE).wait(timeout=timeout)
+
+    width_after_mm = gripper.get_current_width() * 1000.0
+    if status is ACTION_STATUS_ENUM.TIMEOUT and abs(width_after_mm - width_before_mm) < GRIPPER_STALL_TOLERANCE_MM:
+        raise RuntimeError(
+            f"The gripper did not move at all in {timeout:.0f} s: told to go to {width * 1000:.0f} mm, still at "
+            f"{width_after_mm:.1f} mm. It is accepting commands but not executing them -- check the Robotiq URCap "
+            "on the teach pendant (is the gripper activated and fault-free?), that the robot is in remote control, "
+            "and that the fingers are not physically blocked."
+        )
+    logger.info(f"{description}: fingers now at {width_after_mm:.1f} mm.")
 
 
 def check_grasp(gripper: ParallelPositionGripper, brick_width_mm: float) -> Tuple[bool, str]:
@@ -377,7 +516,7 @@ def release_and_retreat(
     from millimetres up, rather than carrying it away and dropping it somewhere else.
     """
     try:
-        gripper.move(GRIPPER_MAX_STROKE, speed=GRIPPER_SPEED).wait()
+        gripper.move(GRIPPER_MAX_STROKE, speed=GRIPPER_SPEED).wait(timeout=GRIPPER_MOVE_TIMEOUT)
     except Exception as exception:  # noqa: BLE001 - recovery must not raise
         logger.warning(f"Could not open the gripper while recovering: {exception}")
     try:
@@ -409,15 +548,18 @@ def grasp_and_lift(
     open_width = min((brick_width_mm + GRIPPER_APPROACH_MARGIN_MM) / 1000.0, GRIPPER_MAX_STROKE)
     close_width = max((brick_width_mm - GRIPPER_SQUEEZE_MM) / 1000.0, 0.0)
 
-    logger.info(f"Opening the gripper to {open_width * 1000:.0f} mm.")
-    gripper.move(open_width, speed=GRIPPER_SPEED, force=GRIPPER_FORCE).wait()
+    # Opening happens before the descent, and it is also the first time the gripper is asked to do
+    # anything: if it is going to refuse to move, this is where we find out, with the fingers still
+    # clear of the brick.
+    move_gripper(gripper, open_width, "Opening the gripper")
 
     descent_mm = (pregrasp_pose[2, 3] - grasp_pose[2, 3]) * 1000.0
     logger.info(f"Descending {descent_mm:.1f} mm onto the brick.")
     arm.move_linear_to_tcp_pose(grasp_pose, linear_speed=linear_speed).wait()
 
-    logger.info(f"Closing the gripper to {close_width * 1000:.0f} mm.")
-    gripper.move(close_width, speed=GRIPPER_SPEED, force=GRIPPER_FORCE).wait()
+    # A close that stalls on the brick is a *success*, not a timeout: the Robotiq's own
+    # object-detection flag ends the wait, and check_grasp below decides what it closed on.
+    move_gripper(gripper, close_width, "Closing the gripper")
 
     holding, reason = check_grasp(gripper, brick_width_mm)
     if not holding:
@@ -512,19 +654,33 @@ def stop_arm(arm: PositionManipulator) -> None:
 )
 @click.option(
     "--grasp-depth-mm",
-    type=click.FloatRange(0.0, BRICK_HEIGHT_MM - MIN_FINGERTIP_CLEARANCE_MM),
-    default=GRASP_DEPTH_MM,
-    show_default=True,
-    help="How far below the brick's top face to descend before closing. Capped so the fingertips stay "
-    f"{MIN_FINGERTIP_CLEARANCE_MM:.1f} mm above the table for a {BRICK_HEIGHT_MM:.1f} mm brick.",
+    type=click.FloatRange(0.0, 80.0),
+    default=None,
+    help="How far below the brick's top face to descend before closing. Defaults to "
+    f"{GRASP_DEPTH_MM:.1f} mm, and is capped at runtime to leave the fingertips {MIN_FINGERTIP_CLEARANCE_MM:.1f} mm "
+    "above the table for whatever part this actually is -- which is why the cap is not a fixed number here.",
 )
 @click.option(
     "--brick-width-mm",
     type=click.FloatRange(1.0, 80.0),
-    default=BRICK_WIDTH_MM,
+    default=None,
+    help="Width the fingers close on, used to size the grip and to verify it. By default it is taken "
+    "from submodule_1's handoff, which measured the brick; pass this to override it (e.g. the long "
+    "side, to grip the same brick end-on).",
+)
+@click.option(
+    "--brick-height-mm",
+    type=click.FloatRange(0.5, 100.0),
+    default=None,
+    help="Height of the brick's top face above the table. By default from the handoff; the descent is "
+    "measured down from the pregrasp, so this only sets how deep it is safe to go.",
+)
+@click.option(
+    "--handoff-path",
+    default=BRICK_HANDOFF_PATH,
     show_default=True,
-    help="Width the fingers close on, used to size the grip and to verify it. Default is a 1x3 brick's "
-    "7.8 mm short side; pass 23.8 to grip the same brick end-on instead.",
+    help="Where submodule_1 left what it measured about this brick. Ignored if it is stale, or if it "
+    "describes a brick somewhere other than where the arm is standing.",
 )
 @click.option(
     "--dry-run",
@@ -543,8 +699,10 @@ def main(
     yaw_deg: Optional[float],
     yaw_offset_deg: float,
     closing_axis: str,
-    grasp_depth_mm: float,
-    brick_width_mm: float,
+    grasp_depth_mm: Optional[float],
+    brick_width_mm: Optional[float],
+    brick_height_mm: Optional[float],
+    handoff_path: str,
     dry_run: bool,
     yes: bool,
 ) -> None:
@@ -578,7 +736,18 @@ def main(
             f"(base frame, {closing_axis}-axis of the tool)."
         )
 
-        requested_angle = requested_closing_angle(pregrasp, yaw_deg, yaw_offset_deg)
+        # What is being grasped, from submodule_1's measurement. read_handoff refuses a file that is
+        # stale or that describes a brick somewhere other than where the arm is standing, so a
+        # fallback here means "nothing trustworthy was measured", never "the wrong brick was used".
+        handoff = read_handoff(handoff_path, BRICK_HANDOFF_MAX_AGE, expected_position=pregrasp.position[:2])
+        brick_width_mm, brick_height_mm, handoff_closing_deg = resolve_brick(
+            handoff, brick_width_mm, brick_height_mm
+        )
+        grasp_depth_mm = resolve_grasp_depth(grasp_depth_mm, brick_height_mm)
+
+        requested_angle = requested_closing_angle(
+            pregrasp, yaw_deg, yaw_offset_deg, measured_closing_deg=handoff_closing_deg
+        )
         grasp_position = np.array(
             [pregrasp.position[0], pregrasp.position[1], pregrasp.brick_top_z - grasp_depth_mm / 1000.0]
         )
@@ -619,7 +788,7 @@ def main(
             f"Plan: turn the wrist to close along {math.degrees(actual_angle):.0f} deg, descend "
             f"{(pregrasp.position[2] - grasp_position[2]) * 1000:.1f} mm to z={grasp_position[2]:.4f} m "
             f"({grasp_depth_mm:.1f} mm into the brick, leaving "
-            f"{BRICK_HEIGHT_MM - grasp_depth_mm:.1f} mm of fingertip clearance above the table), close on "
+            f"{brick_height_mm - grasp_depth_mm:.1f} mm of fingertip clearance above the table), close on "
             f"{brick_width_mm:.1f} mm, then lift {actual_lift * 100:.0f} cm to z={lift_pose[2, 3]:.4f} m."
         )
 
@@ -658,6 +827,11 @@ def main(
                     f"{np.hypot(grasp_pose[0, 3], grasp_pose[1, 3]) * 100:.0f} cm from the base horizontally "
                     f"and a {robot_type} reaches ~{APPROX_ARM_REACH[robot_type] * 100:.0f} cm."
                 ) from exception
+            except RuntimeError as exception:
+                # move_gripper's "the gripper never moved" -- already a complete explanation, so print
+                # it as the error rather than a traceback. The arm is stopped either way.
+                stop_arm(arm)
+                raise click.ClickException(str(exception)) from exception
             except Exception:
                 stop_arm(arm)
                 raise

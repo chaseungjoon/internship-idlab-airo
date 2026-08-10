@@ -1,47 +1,6 @@
-"""M1 submodule 1 (physical): locate a hand-clicked brick from two views, then pregrasp above it.
-
-Workflow:
-  1. Move the arm to two predefined joint configurations (``POS1``, ``POS2``), grabbing an RGB-D frame
-     at each.
-  2. In a popup of each frame, click the same physical point and press Enter to confirm.
-  3. Each (pixel, eye-in-hand camera pose) pair back-projects to a ray in the robot base frame; the
-     camera pose is forward kinematics (``arm.get_tcp_pose()``) composed with the hand-eye
-     calibration (camera-in-TCP).
-  4. Those rays are turned into a 3D point (see below), and the arm moves to a straight-down pregrasp
-     pose ``PREGRASP_HEIGHT`` above it.
-
-Why the target is not simply triangulated any more
---------------------------------------------------
-It used to be, and the pregrasp came out roughly 12 cm above the brick instead of 3. The two-view
-geometry is not the culprit -- at POS1/POS2 the camera centres are ~23 cm apart and the lines of sight
-meet at ~40 degrees, so a 5 px click error only moves the triangulated point 2-4 mm. The error comes
-from the hand-eye calibration: with the three samples in ``calibration_dir/results_n=3``, the four
-OpenCV methods put the camera in the TCP frame 9.1 cm apart in x and ~4 cm apart in y and z. Both rays
-therefore start from the wrong place by roughly that much, and their intersection inherits it. No
-amount of triangulation can recover from that, because the error is in the ray *origins*, not in the
-clicks. **Re-run the hand-eye calibration with 10-20 board poses**; three is the bare minimum and the
-residual it reports cannot distinguish between methods that disagree by 9 cm.
-
-Meanwhile, the height -- the part that was worst and matters most, since it decides whether the
-fingers reach the brick at all -- is made independent of that calibration entirely. A brick sits on
-the table, so its top face is at a height we already know: the table's height in the base frame plus
-one brick height. So the clicked rays are intersected with *that* plane instead of with each other
-(:func:`project_ray_onto_height`). The z of the result is then exact by construction, and only x and y
-still carry the calibration error. The table's height comes from ``--table-z``, which defaults to 0
-because the robot is bolted to the same table the bricks lie on, so the base frame's z = 0 plane is
-that table.
-
-The depth stream is used as a cross-check rather than as the source: it measures the table plane
-directly, but through the same camera pose, so it carries the same bias. The gap between the
-depth-measured table and ``--table-z`` is printed every run precisely *because* it is an estimate of
-that bias -- if it reads 9 cm, the calibration is off by 9 cm along the camera's view direction.
-
-Connection, camera, calibration loading and reachable-orientation handling are reused from
-``submodule_0``; shared robot/camera/calibration constants come from ``config.py``. Pose maths uses
-airo-mono's ``SE3Container`` and imaging uses airo-camera-toolkit. :mod:`submodule_2` picks up from
-the pregrasp pose this leaves the arm at.
 """
-
+m1 submodule 1: locate a hand-clicked brick from two views, then pregrasp above it.
+"""
 import os
 import sys
 from typing import List, Optional, Tuple
@@ -56,41 +15,37 @@ from airo_spatial_algebra import SE3Container
 from airo_typing import CameraIntrinsicsMatrixType, HomogeneousMatrixType, NumpyIntImageType
 from loguru import logger
 
-_PHYSICAL_DIR = os.path.dirname(os.path.abspath(__file__))
-_SRC_DIR = os.path.normpath(os.path.join(_PHYSICAL_DIR, "..", ".."))
-for _path in (_PHYSICAL_DIR, _SRC_DIR):
-    if _path not in sys.path:
-        sys.path.insert(0, _path)
+_SRC_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+if _SRC_DIR not in sys.path:
+    sys.path.insert(0, _SRC_DIR)
 from config import (
     APPROX_ARM_REACH,
+    BRICK_HANDOFF_PATH,
     CAMERA_RESOLUTIONS,
     DEFAULT_CALIBRATION_DIR,
     DEFAULT_CAMERA_RESOLUTION,
     DEFAULT_IP_ADDRESSES,
     DEFAULT_REALMAN_PORT,
+    FALLBACK_BRICK_HEIGHT,
+    FOOTPRINT_MATCH_TOLERANCE,
+    PREGRASP_HEIGHT,
     SUPPORTED_ROBOT_TYPES,
-)
-from submodule_0 import (
+    TABLE_Z,
     connect_arm,
+    ensure_control_ready,
     find_reachable_hover_orientation,
     load_camera_pose_in_tcp,
     open_camera,
 )
+from lego_catalog import load_catalog, parts_in_set
+from m1.physical.brick_measure import ViewObservation, measure_brick, write_handoff
 
-# Joint configurations for triangulation
 POS1: List[float] = [-0.08343679, -1.31992237,  0.26209098, -0.40548201, -1.20620281, -1.63604099]
 POS2: List[float] = [0.81975543, -1.24165185,  0.23308164, -0.76548697, -1.72945053, -0.95741016]
 
-PREGRASP_HEIGHT = 0.03
 MAX_PREGRASP_HEIGHT = 0.05
 PARALLEL_RAY_EPS = 1e-6
 LARGE_TRIANGULATION_GAP = 0.02
-
-# Height of the table's surface in the robot's base frame. 
-DEFAULT_TABLE_Z = 0.0
-
-# 3622
-BRICK_HEIGHT = 0.0096
 
 MIN_VALID_DEPTH = 0.10
 MIN_TABLE_DEPTH_POINTS = 500
@@ -100,34 +55,58 @@ LARGE_VIEW_DISAGREEMENT = 0.01
 _CONFIRM_KEYS = (13, 10, 32)
 _ABORT_KEYS = (27, ord("q"))
 
+MAX_CLICK_WINDOW_WIDTH = 1280
+MAX_CLICK_WINDOW_HEIGHT = 800
+
 
 def click_pixel(image_rgb: NumpyIntImageType, window_title: str) -> Tuple[int, int]:
     """Show ``image_rgb`` and return the ``(u, v)`` pixel the user clicks and confirms.
 
     Left-click to place the marker (re-click to move it), Enter/Space to confirm, Esc/q to abort.
 
+    The image is downscaled *here*, by a factor this function knows, and shown in a fixed-size
+    (``WINDOW_AUTOSIZE``) window, rather than handed at full size to a resizable ``WINDOW_NORMAL``
+    window. In a resizable window the picture is stretched to fit whatever size the window manager
+    gives it, and whether the mouse coordinates that come back are image pixels or window pixels is
+    up to the highgui backend -- a silent, backend-dependent scale factor on the one input the whole
+    module is built on. Scaling it ourselves makes the mapping ours: the click is divided by a known
+    ``scale`` and nothing else can rescale it.
+
     Raises:
         RuntimeError: if the user aborts or closes the window before confirming a pixel.
     """
-    image_bgr = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR).copy()
+    image_bgr = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
+    height, width = image_bgr.shape[:2]
+    scale = min(1.0, MAX_CLICK_WINDOW_WIDTH / width, MAX_CLICK_WINDOW_HEIGHT / height)
+    display = image_bgr if scale == 1.0 else cv2.resize(image_bgr, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
     selection: dict = {}
 
     def on_mouse(event: int, x: int, y: int, flags: int, param: object) -> None:
         if event == cv2.EVENT_LBUTTONDOWN:
-            selection["uv"] = (int(x), int(y))
+            selection["xy"] = (int(x), int(y))
 
-    cv2.namedWindow(window_title, cv2.WINDOW_NORMAL)
+    def to_image_pixel(x: int, y: int) -> Tuple[int, int]:
+        """Displayed-window pixel -> full-resolution image pixel, clamped to the image."""
+        return (
+            int(min(max(round(x / scale), 0), width - 1)),
+            int(min(max(round(y / scale), 0), height - 1)),
+        )
+
+    cv2.namedWindow(window_title, cv2.WINDOW_AUTOSIZE)
     cv2.setMouseCallback(window_title, on_mouse)
-    logger.info(f"[{window_title}] click the target point, then press Enter to confirm (Esc to abort).")
+    logger.info(
+        f"[{window_title}] click the target point, then press Enter to confirm (Esc to abort). "
+        f"Showing the {width}x{height} frame at {scale:.2f}x, so one click pixel is {1 / scale:.1f} image pixel(s)."
+    )
     try:
         while True:
-            canvas = image_bgr.copy()
-            if "uv" in selection:
-                cv2.drawMarker(canvas, selection["uv"], (0, 255, 0), cv2.MARKER_CROSS, 20, 2)
+            canvas = display.copy()
+            if "xy" in selection:
+                cv2.drawMarker(canvas, selection["xy"], (0, 255, 0), cv2.MARKER_CROSS, 20, 2)
             cv2.imshow(window_title, canvas)
             key = cv2.waitKey(20) & 0xFF
-            if key in _CONFIRM_KEYS and "uv" in selection:
-                return selection["uv"]
+            if key in _CONFIRM_KEYS and "xy" in selection:
+                return to_image_pixel(*selection["xy"])
             if key in _ABORT_KEYS:
                 raise RuntimeError("Pixel selection aborted by the user.")
             if cv2.getWindowProperty(window_title, cv2.WND_PROP_VISIBLE) < 1:
@@ -263,13 +242,17 @@ def capture_view_ray(
     joint_configuration: np.ndarray,
     joint_speed: float,
     view_name: str,
-) -> Tuple[Tuple[np.ndarray, np.ndarray], Optional[float]]:
+) -> Tuple[Tuple[np.ndarray, np.ndarray], Optional[float], ViewObservation]:
     """Move to ``joint_configuration``, grab a frame, and return the clicked ray and the table height.
 
     The arm is stationary once the move completes, so the frame and the TCP pose it is paired with are
     taken together, giving a consistent eye-in-hand camera pose for the back-projection. Colour and
     depth come from the same ``grab_images`` buffer, so the table cross-check describes the same
     instant as the click.
+
+    The frame, the camera pose and the clicked pixel are also returned as a :class:`ViewObservation`,
+    which is everything :func:`brick_measure.measure_brick` needs to work out *which brick* this is --
+    measured from the same viewpoint, at the same instant, as the click that chose it.
     """
     logger.info(f"Moving to {view_name}: {np.round(joint_configuration, 3)} rad ...")
     arm.move_to_joint_configuration(joint_configuration, joint_speed=joint_speed).wait()
@@ -278,10 +261,23 @@ def capture_view_ray(
     image = camera.retrieve_rgb_image_as_int()
     X_base_camera = arm.get_tcp_pose() @ X_tcp_camera  # eye-in-hand: FK composed with hand-eye calibration.
     table_z = measure_table_height(camera, X_base_camera)
+    try:
+        depth_map = np.asarray(camera.retrieve_depth_map(), dtype=np.float32)
+    except Exception as exception:  # noqa: BLE001 - depth only breaks ties; its absence is survivable
+        logger.debug(f"No depth map in {view_name}: {exception}")
+        depth_map = None
 
     u, v = click_pixel(image, f"{view_name} - click the target point")
     logger.info(f"{view_name}: clicked pixel (u={u}, v={v}).")
-    return pixel_to_base_ray(u, v, camera.intrinsics_matrix(), X_base_camera), table_z
+    observation = ViewObservation(
+        image_rgb=image,
+        click_uv=(u, v),
+        intrinsics_matrix=camera.intrinsics_matrix(),
+        X_base_camera=X_base_camera,
+        depth_map=depth_map,
+        name=view_name,
+    )
+    return pixel_to_base_ray(u, v, camera.intrinsics_matrix(), X_base_camera), table_z, observation
 
 
 def out_of_reach_message(robot_type: str, position: np.ndarray, exception: Exception) -> str:
@@ -296,26 +292,6 @@ def out_of_reach_message(robot_type: str, position: np.ndarray, exception: Excep
         f"(aim for < ~{0.8 * limit * 100:.0f} cm horizontally for a comfortable top-down grasp), then "
         f"re-run. [{type(exception).__name__}]"
     )
-
-
-def ensure_control_ready(arm: PositionManipulator) -> None:
-    """Re-arm the UR control script if it has stopped (e.g. during a long pixel-selection pause).
-
-    ur-rtde's reachability check (``isPoseWithinSafetyLimits``, used by ``move_to_tcp_pose``) and the
-    moves themselves need the control script running. If it has stopped, ur-rtde prints "RTDE control
-    script is not running!" and then reports *every* pose as unreachable — which looks exactly like a
-    kinematic/safety rejection. This restarts the script so the reachability decision is trustworthy.
-    RealMan and other drivers don't expose ``rtde_control`` and are left untouched.
-    """
-    rtde_control = getattr(arm, "rtde_control", None)
-    if rtde_control is None:
-        return
-    try:
-        if not rtde_control.isProgramRunning():
-            logger.warning("The UR control script had stopped; reuploading it before moving.")
-            rtde_control.reuploadScript()
-    except Exception as exception:  # noqa: BLE001 - never let a recovery attempt crash the run
-        logger.warning(f"Could not verify/restart the UR control script: {exception}")
 
 
 @click.command()
@@ -370,19 +346,43 @@ def ensure_control_ready(arm: PositionManipulator) -> None:
 @click.option(
     "--table-z",
     type=float,
-    default=DEFAULT_TABLE_Z,
+    default=TABLE_Z,
     show_default=True,
     help="Height of the table's surface in the robot's base frame (metres). This is what the pregrasp "
-    "height is anchored to, so it is the one number that has to be right; 0 is correct when the robot "
-    "is bolted to the same tabletop as the bricks. The run prints what the depth stream makes of it.",
+    "height is anchored to, so it is the one number that has to be right. It is NOT 0: the base frame's "
+    "z = 0 is the robot's mounting flange and the arm sits on a plate, so the tabletop is ~2.4 cm below "
+    "it -- the default is measured from the hand-eye calibration's own board images (see config.TABLE_Z). "
+    "The run prints what the depth stream makes of it.",
 )
 @click.option(
     "--brick-height",
     type=click.FloatRange(0.0, 0.10, min_open=True),
-    default=BRICK_HEIGHT,
+    default=None,
+    help="Height of the brick above the table (metres), if you want to state it rather than have it "
+    "measured. Giving it turns the measurement off entirely and pins every part to this height "
+    "(0.0096 for a standard brick, 0.0032 for a plate). By default the brick is measured and looked "
+    "up in the part catalog instead.",
+)
+@click.option(
+    "--measure-brick/--no-measure-brick",
+    "measure_brick_flag",  # named apart from the measure_brick() this calls
+    default=True,
     show_default=True,
-    help="Height of the brick above the table (metres); 0.0096 for a standard brick, 0.0032 for a plate. "
-    "Sets how far above the table the clicked rays are projected.",
+    help="Measure the clicked brick's footprint from both views and identify it in the part catalog "
+    "(lego_3d/), instead of assuming every brick is a 1x3. Its real width, length and height are "
+    "written to the handoff file for submodule_2 to grasp with.",
+)
+@click.option(
+    "--debug-dir",
+    default=None,
+    help="If set, save each view's segmentation here with the chosen brick outlined -- the only way to "
+    "check that the measurement outlined one brick rather than two touching ones.",
+)
+@click.option(
+    "--any-part",
+    is_flag=True,
+    help="Match the measured footprint against every part with a mesh, not only those listed in "
+    "lego_list.csv. Use it when the brick on the table is not from this set.",
 )
 def main(
     robot_type: str,
@@ -393,7 +393,10 @@ def main(
     camera_resolution: str,
     pregrasp_height: float,
     table_z: float,
-    brick_height: float,
+    brick_height: Optional[float],
+    measure_brick_flag: bool,
+    debug_dir: Optional[str],
+    any_part: bool,
 ) -> None:
     """Locate a hand-clicked brick from two views and move to a pregrasp above it."""
     view_configurations = [np.asarray(POS1, dtype=float), np.asarray(POS2, dtype=float)]
@@ -420,11 +423,54 @@ def main(
 
         joint_speed = speed_ratio / 100 * min(arm.manipulator_specs.max_joint_speeds)
 
-        ray_1, table_z_1 = capture_view_ray(arm, camera, X_tcp_camera, view_configurations[0], joint_speed, "view 1")
-        ray_2, table_z_2 = capture_view_ray(arm, camera, X_tcp_camera, view_configurations[1], joint_speed, "view 2")
+        ray_1, table_z_1, view_1 = capture_view_ray(
+            arm, camera, X_tcp_camera, view_configurations[0], joint_speed, "view 1"
+        )
+        ray_2, table_z_2, view_2 = capture_view_ray(
+            arm, camera, X_tcp_camera, view_configurations[1], joint_speed, "view 2"
+        )
 
-        # The brick's top face: one brick height above the table, whose height we know rather than
-        # measure (see the module docstring). This is the plane both clicked rays are projected onto.
+        # Which brick is this? Both views saw it, from 40 cm and in focus, which is the only place in
+        # the whole pick where it *can* be measured -- by the pregrasp the camera is inside its own
+        # blind zone. So the footprint is measured here and the part looked up here, and submodule_2
+        # is told the answer rather than assuming a 1x3.
+        brick = None
+        if brick_height is not None:
+            logger.info(
+                f"--brick-height {brick_height * 1000:.1f} mm given, so the brick is not measured; every part "
+                "is treated as that tall."
+            )
+        elif not measure_brick_flag:
+            logger.warning(
+                "--no-measure-brick: falling back to the default 1x3 dimensions, which are wrong for every "
+                "other part in the pile."
+            )
+        else:
+            brick = measure_brick(
+                [view_1, view_2],
+                table_z=table_z,
+                catalog=load_catalog(),
+                tolerance=FOOTPRINT_MATCH_TOLERANCE,
+                initial_height=FALLBACK_BRICK_HEIGHT,
+                restrict_to=None if any_part else parts_in_set(),
+                debug_dir=debug_dir,
+            )
+
+        if brick is not None and brick.part is not None:
+            brick_height = brick.height
+            logger.success(f"Brick identified: {brick.describe()}.")
+            if brick.part.obstruction > 0:
+                logger.warning(
+                    f"This part carries {brick.part.obstruction * 1000:.1f} mm of structure above the face being "
+                    "grasped; a top-down grasp aimed at that face may foul it."
+                )
+        else:
+            if brick is not None:
+                logger.warning("The brick was measured but matched no catalog part; using the default dimensions.")
+            brick_height = brick_height if brick_height is not None else FALLBACK_BRICK_HEIGHT
+
+        # The brick's top face: one brick height above the table. This is the plane both clicked rays
+        # are projected onto (see the module docstring).
         brick_top_z = table_z + brick_height
 
         # Cross-check first, because if it fires it explains everything that follows.
@@ -438,12 +484,13 @@ def main(
             )
             if abs(disagreement) > SUSPICIOUS_TABLE_DISAGREEMENT:
                 logger.warning(
-                    f"That is {abs(disagreement) * 100:.1f} cm apart. Nothing else in the chain can shift the "
-                    f"table that far, so the hand-eye calibration in {calibration_path} is off by about that "
-                    "much along the camera's view direction -- which is also how far off x and y will be. "
-                    "Re-run the hand-eye calibration with 10-20 board poses (the current one used 3, and its "
-                    "four methods disagree by 9 cm on where the camera is). The pregrasp height below is "
-                    "unaffected: it is anchored to --table-z, not to the camera."
+                    f"That is {abs(disagreement) * 100:.1f} cm apart, and nothing else in the chain can shift the "
+                    "table that far. Either --table-z is wrong for this table (it is measured from the "
+                    f"calibration board in {calibration_path}; re-measure it if the robot has been re-mounted), "
+                    "or the hand-eye calibration is off by about that much along the camera's view direction -- "
+                    "which is also roughly how far off x and y will be. Re-running the hand-eye calibration with "
+                    "10-20 board poses instead of 3 is the fix for the second case. The pregrasp *height* below "
+                    "is unaffected either way: it is anchored to --table-z, not to the camera."
                 )
         else:
             logger.warning(
@@ -523,6 +570,12 @@ def main(
                 "unreachable. If it does, move the target closer to the base and re-run."
             )
 
+        # Written before the move rather than after: if the move fails or is interrupted, the file
+        # still describes the brick at a position that no longer matches where the arm is standing,
+        # and submodule_2's position check will refuse it -- which is the correct outcome.
+        if brick is not None and brick.part is not None:
+            write_handoff(BRICK_HANDOFF_PATH, brick, brick_position=point[:2])
+
         input(f"about to move to the pregrasp at {X_base_pregrasp[:3, 3].round(3)} m (base frame), press enter to continue")
         try:
             arm.move_to_tcp_pose(X_base_pregrasp, joint_speed=joint_speed).wait()
@@ -530,6 +583,11 @@ def main(
             logger.error(out_of_reach_message(robot_type, X_base_pregrasp[:3, 3], exception))
             os._exit(1)
         logger.info(f"reached:\n{arm.get_tcp_pose()}")
+        if brick is not None and brick.part is not None:
+            logger.info(
+                f"submodule_2 will grasp a {brick.width * 1000:.1f} mm wide part with the fingers closing along "
+                f"{np.degrees(brick.closing_heading):.0f} deg -- no --yaw-deg needed."
+            )
 
     os._exit(0)
 
