@@ -1,21 +1,49 @@
-"""M1 submodule 1 (physical): triangulate a hand-clicked point from two views, then pregrasp above it.
+"""M1 submodule 1 (physical): locate a hand-clicked brick from two views, then pregrasp above it.
 
 Workflow:
-  1. Move the arm to two predefined joint configurations (``POS1``, ``POS2``), grabbing an RGB frame
+  1. Move the arm to two predefined joint configurations (``POS1``, ``POS2``), grabbing an RGB-D frame
      at each.
   2. In a popup of each frame, click the same physical point and press Enter to confirm.
   3. Each (pixel, eye-in-hand camera pose) pair back-projects to a ray in the robot base frame; the
      camera pose is forward kinematics (``arm.get_tcp_pose()``) composed with the hand-eye
-     calibration (camera-in-TCP). The two rays are triangulated to a single 3D point.
-  4. The arm moves to a straight-down pregrasp pose ``PREGRASP_HEIGHT`` above that point.
+     calibration (camera-in-TCP).
+  4. Those rays are turned into a 3D point (see below), and the arm moves to a straight-down pregrasp
+     pose ``PREGRASP_HEIGHT`` above it.
+
+Why the target is not simply triangulated any more
+--------------------------------------------------
+It used to be, and the pregrasp came out roughly 12 cm above the brick instead of 3. The two-view
+geometry is not the culprit -- at POS1/POS2 the camera centres are ~23 cm apart and the lines of sight
+meet at ~40 degrees, so a 5 px click error only moves the triangulated point 2-4 mm. The error comes
+from the hand-eye calibration: with the three samples in ``calibration_dir/results_n=3``, the four
+OpenCV methods put the camera in the TCP frame 9.1 cm apart in x and ~4 cm apart in y and z. Both rays
+therefore start from the wrong place by roughly that much, and their intersection inherits it. No
+amount of triangulation can recover from that, because the error is in the ray *origins*, not in the
+clicks. **Re-run the hand-eye calibration with 10-20 board poses**; three is the bare minimum and the
+residual it reports cannot distinguish between methods that disagree by 9 cm.
+
+Meanwhile, the height -- the part that was worst and matters most, since it decides whether the
+fingers reach the brick at all -- is made independent of that calibration entirely. A brick sits on
+the table, so its top face is at a height we already know: the table's height in the base frame plus
+one brick height. So the clicked rays are intersected with *that* plane instead of with each other
+(:func:`project_ray_onto_height`). The z of the result is then exact by construction, and only x and y
+still carry the calibration error. The table's height comes from ``--table-z``, which defaults to 0
+because the robot is bolted to the same table the bricks lie on, so the base frame's z = 0 plane is
+that table.
+
+The depth stream is used as a cross-check rather than as the source: it measures the table plane
+directly, but through the same camera pose, so it carries the same bias. The gap between the
+depth-measured table and ``--table-z`` is printed every run precisely *because* it is an estimate of
+that bias -- if it reads 9 cm, the calibration is off by 9 cm along the camera's view direction.
 
 Connection, camera, calibration loading and reachable-orientation handling are reused from
 ``submodule_0``; pose maths uses airo-mono's ``SE3Container`` and imaging uses airo-camera-toolkit.
+:mod:`submodule_2` picks up from the pregrasp pose this leaves the arm at.
 """
 
 import os
 import sys
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import click
 import cv2
@@ -47,12 +75,34 @@ from submodule_0 import (  # noqa: E402
 POS1: List[float] = [-0.08343679, -1.31992237,  0.26209098, -0.40548201, -1.20620281, -1.63604099]
 POS2: List[float] = [0.81975543, -1.24165185,  0.23308164, -0.76548697, -1.72945053, -0.95741016]
 
-PREGRASP_HEIGHT = 0.03  # metres above the triangulated point for the pregrasp pose.
+PREGRASP_HEIGHT = 0.03  # metres above the located brick top for the pregrasp pose.
+MAX_PREGRASP_HEIGHT = 0.05  # metres; a pregrasp higher than this is too far to descend from reliably.
 PARALLEL_RAY_EPS = 1e-6  # |1 - (da·db)^2| below this -> the two views are effectively collinear.
 LARGE_TRIANGULATION_GAP = 0.02  # metres between the two rays' closest points above which we warn.
 
+# Height of the table's surface in the robot's base frame. Zero because the UR3e's base frame origin
+# sits on its mounting surface, which is the same tabletop the bricks lie on; set --table-z if the
+# robot stands on a riser or the bricks are on a raised platform. This is the anchor that makes the
+# pregrasp height independent of the hand-eye calibration -- see the module docstring.
+DEFAULT_TABLE_Z = 0.0
+
+# BrickLink 3622 "Brick 1 x 3" is 9.6 mm tall (a brick, not a plate), so its top face sits this far
+# above the table. Only the height matters here; submodule_2 owns the rest of the brick's geometry.
+BRICK_HEIGHT = 0.0096
+
+# Depth is only a cross-check here, but a cross-check needs enough measured pixels to be worth
+# printing. Below MIN_VALID_DEPTH metres the RealSense reports "no measurement", not a distance.
+MIN_VALID_DEPTH = 0.10
+MIN_TABLE_DEPTH_POINTS = 500
+# Gap between the depth-measured table and --table-z above which the hand-eye calibration is called
+# out as the likely cause, since nothing else in the chain can shift the table by this much.
+SUSPICIOUS_TABLE_DISAGREEMENT = 0.02
+# Two views' ray-plane intersections further apart than this mean the clicks are not on the same
+# point, or the calibration's lateral error is large enough to matter for a 7.8 mm-wide brick.
+LARGE_VIEW_DISAGREEMENT = 0.01
+
 # Rough maximum TCP reach from the base (metres), for an out-of-workspace warning/diagnosis.
-APPROX_ARM_REACH = {"ur3e": 0.50, "realman": 0.85}
+APPROX_ARM_REACH = {"ur3e": 0.66, "realman": 0.85}
 
 _CONFIRM_KEYS = (13, 10, 32)  # Enter (either code) or Space.
 _ABORT_KEYS = (27, ord("q"))  # Esc or q.
@@ -145,6 +195,74 @@ def triangulate_rays(
     return point, gap
 
 
+def project_ray_onto_height(ray: Tuple[np.ndarray, np.ndarray], z: float) -> np.ndarray:
+    """Intersect a ``(origin, unit direction)`` base-frame ray with the horizontal plane at ``z``.
+
+    This is what replaced triangulating the two rays against each other. Both rays start from the
+    camera centre, which the hand-eye calibration gets wrong by centimetres, so their intersection is
+    wrong by centimetres in every axis. Intersecting with a plane whose height is *known* -- the table
+    plus a brick -- fixes the answer's z outright and leaves only x and y carrying the calibration
+    error, which is the trade worth making: a few millimetres sideways still grasps a 7.8 mm brick,
+    9 cm too high grasps nothing at all.
+
+    Raises:
+        RuntimeError: if the ray is (near-)parallel to the plane, or the plane is behind the camera.
+    """
+    origin, direction = ray
+    if abs(direction[2]) < 0.2:  # more than ~78 degrees off vertical
+        raise RuntimeError(
+            "The line of sight is almost horizontal, so it barely crosses the table plane and the "
+            "projected position would be meaningless. Use viewpoints that look down at the pile."
+        )
+    distance = (z - origin[2]) / direction[2]
+    if distance <= 0:
+        raise RuntimeError(
+            "The table plane lies behind the camera. Check --table-z and the hand-eye calibration."
+        )
+    return origin + distance * direction
+
+
+def measure_table_height(camera: RGBDCamera, X_base_camera: HomogeneousMatrixType) -> Optional[float]:
+    """Height of the table in the base frame as the depth stream sees it, or ``None`` if it cannot.
+
+    The table is the largest flat surface in view, so rather than fitting a plane (which the pile of
+    bricks biases upward) this takes the mode of the height histogram: the tallest bin of a 2 mm
+    histogram over every measured height. Bricks, the gripper and stray depth spikes land in other
+    bins and cannot pull it.
+
+    Used only as a cross-check on ``--table-z``. It goes through the same (mis-)calibrated camera pose
+    as everything else, so it is not an independent measurement of the table -- but that is exactly
+    what makes it useful: whatever it disagrees with ``--table-z`` by is an estimate of the hand-eye
+    calibration's error along the camera's view direction.
+    """
+    try:
+        depth = np.asarray(camera.retrieve_depth_map(), dtype=np.float32)
+    except Exception as exception:  # noqa: BLE001 - a cross-check must never break the run
+        logger.debug(f"No depth map available for the table cross-check: {exception}")
+        return None
+
+    valid = np.isfinite(depth) & (depth > MIN_VALID_DEPTH)
+    if valid.sum() < MIN_TABLE_DEPTH_POINTS:
+        logger.debug(f"Only {int(valid.sum())} valid depth pixel(s); skipping the table cross-check.")
+        return None
+
+    height, width = depth.shape
+    intrinsics = camera.intrinsics_matrix()
+    fx, fy = intrinsics[0, 0], intrinsics[1, 1]
+    cx, cy = intrinsics[0, 2], intrinsics[1, 2]
+    row, col = np.mgrid[0:height, 0:width]
+    z = depth[valid]
+    points_camera = np.stack([(col[valid] - cx) * z / fx, (row[valid] - cy) * z / fy, z], axis=-1)
+    heights = points_camera @ X_base_camera[:3, :3].T[:, 2] + X_base_camera[2, 3]
+
+    low, high = np.percentile(heights, [1.0, 99.0])
+    if high - low < 1e-3:
+        return float(np.median(heights))
+    counts, edges = np.histogram(heights, bins=max(4, int(round((high - low) / 0.002))), range=(low, high))
+    peak = int(np.argmax(counts))
+    return float(np.median(heights[(heights >= edges[peak]) & (heights <= edges[peak + 1])]))
+
+
 def capture_view_ray(
     arm: PositionManipulator,
     camera: RGBDCamera,
@@ -152,11 +270,13 @@ def capture_view_ray(
     joint_configuration: np.ndarray,
     joint_speed: float,
     view_name: str,
-) -> Tuple[np.ndarray, np.ndarray]:
-    """Move to ``joint_configuration``, grab a frame, and return the clicked base-frame ray.
+) -> Tuple[Tuple[np.ndarray, np.ndarray], Optional[float]]:
+    """Move to ``joint_configuration``, grab a frame, and return the clicked ray and the table height.
 
-    The arm is stationary once the move completes, so the frame and the TCP pose it is paired with
-    are taken together, giving a consistent eye-in-hand camera pose for the back-projection.
+    The arm is stationary once the move completes, so the frame and the TCP pose it is paired with are
+    taken together, giving a consistent eye-in-hand camera pose for the back-projection. Colour and
+    depth come from the same ``grab_images`` buffer, so the table cross-check describes the same
+    instant as the click.
     """
     logger.info(f"Moving to {view_name}: {np.round(joint_configuration, 3)} rad ...")
     arm.move_to_joint_configuration(joint_configuration, joint_speed=joint_speed).wait()
@@ -164,10 +284,11 @@ def capture_view_ray(
     camera.grab_images()
     image = camera.retrieve_rgb_image_as_int()
     X_base_camera = arm.get_tcp_pose() @ X_tcp_camera  # eye-in-hand: FK composed with hand-eye calibration.
+    table_z = measure_table_height(camera, X_base_camera)
 
     u, v = click_pixel(image, f"{view_name} - click the target point")
     logger.info(f"{view_name}: clicked pixel (u={u}, v={v}).")
-    return pixel_to_base_ray(u, v, camera.intrinsics_matrix(), X_base_camera)
+    return pixel_to_base_ray(u, v, camera.intrinsics_matrix(), X_base_camera), table_z
 
 
 def out_of_reach_message(robot_type: str, position: np.ndarray, exception: Exception) -> str:
@@ -247,10 +368,28 @@ def ensure_control_ready(arm: PositionManipulator) -> None:
 )
 @click.option(
     "--pregrasp-height",
-    type=click.FloatRange(min=0.0, min_open=True),
+    type=click.FloatRange(0.0, MAX_PREGRASP_HEIGHT, min_open=True),
     default=PREGRASP_HEIGHT,
     show_default=True,
-    help="Metres above the triangulated point for the pregrasp pose.",
+    help=f"Metres above the brick's top face for the pregrasp pose. Capped at {MAX_PREGRASP_HEIGHT * 100:.0f} cm: "
+    "submodule_2 descends from here open-loop, so a higher hover is a longer blind move.",
+)
+@click.option(
+    "--table-z",
+    type=float,
+    default=DEFAULT_TABLE_Z,
+    show_default=True,
+    help="Height of the table's surface in the robot's base frame (metres). This is what the pregrasp "
+    "height is anchored to, so it is the one number that has to be right; 0 is correct when the robot "
+    "is bolted to the same tabletop as the bricks. The run prints what the depth stream makes of it.",
+)
+@click.option(
+    "--brick-height",
+    type=click.FloatRange(0.0, 0.10, min_open=True),
+    default=BRICK_HEIGHT,
+    show_default=True,
+    help="Height of the brick above the table (metres); 0.0096 for a standard brick, 0.0032 for a plate. "
+    "Sets how far above the table the clicked rays are projected.",
 )
 def main(
     robot_type: str,
@@ -260,8 +399,10 @@ def main(
     calibration_path: str,
     camera_resolution: str,
     pregrasp_height: float,
+    table_z: float,
+    brick_height: float,
 ) -> None:
-    """Triangulate a hand-clicked 3D point from two views and move to a pregrasp above it."""
+    """Locate a hand-clicked brick from two views and move to a pregrasp above it."""
     view_configurations = [np.asarray(POS1, dtype=float), np.asarray(POS2, dtype=float)]
     if any(configuration.size == 0 for configuration in view_configurations):
         raise click.ClickException(
@@ -286,19 +427,84 @@ def main(
 
         joint_speed = speed_ratio / 100 * min(arm.manipulator_specs.max_joint_speeds)
 
-        ray_1 = capture_view_ray(arm, camera, X_tcp_camera, view_configurations[0], joint_speed, "view 1")
-        ray_2 = capture_view_ray(arm, camera, X_tcp_camera, view_configurations[1], joint_speed, "view 2")
+        ray_1, table_z_1 = capture_view_ray(arm, camera, X_tcp_camera, view_configurations[0], joint_speed, "view 1")
+        ray_2, table_z_2 = capture_view_ray(arm, camera, X_tcp_camera, view_configurations[1], joint_speed, "view 2")
 
-        point, gap = triangulate_rays(ray_1, ray_2)
-        logger.info(f"Triangulated point: {point.round(4)} m (base frame); rays miss by {gap * 1000:.1f} mm.")
-        if gap > LARGE_TRIANGULATION_GAP:
+        # The brick's top face: one brick height above the table, whose height we know rather than
+        # measure (see the module docstring). This is the plane both clicked rays are projected onto.
+        brick_top_z = table_z + brick_height
+
+        # Cross-check first, because if it fires it explains everything that follows.
+        measured = [z for z in (table_z_1, table_z_2) if z is not None]
+        if measured:
+            measured_table_z = float(np.mean(measured))
+            disagreement = measured_table_z - table_z
+            logger.info(
+                f"Depth sees the table at z={measured_table_z:.4f} m; --table-z says {table_z:.4f} m "
+                f"(difference {disagreement * 100:+.1f} cm)."
+            )
+            if abs(disagreement) > SUSPICIOUS_TABLE_DISAGREEMENT:
+                logger.warning(
+                    f"That is {abs(disagreement) * 100:.1f} cm apart. Nothing else in the chain can shift the "
+                    f"table that far, so the hand-eye calibration in {calibration_path} is off by about that "
+                    "much along the camera's view direction -- which is also how far off x and y will be. "
+                    "Re-run the hand-eye calibration with 10-20 board poses (the current one used 3, and its "
+                    "four methods disagree by 9 cm on where the camera is). The pregrasp height below is "
+                    "unaffected: it is anchored to --table-z, not to the camera."
+                )
+        else:
             logger.warning(
-                f"The two rays miss each other by {gap * 1000:.1f} mm (> {LARGE_TRIANGULATION_GAP * 1000:.0f} mm); "
-                "the two clicks may not be on the same point, or the hand-eye calibration is off. "
-                "Continuing with their midpoint."
+                "No usable depth in either view, so the table height could not be cross-checked; trusting "
+                f"--table-z={table_z:.4f} m outright."
             )
 
+        # Each view's own answer for where the brick is. Their disagreement replaces the triangulation
+        # gap as the quality metric, and measures the same thing more usefully: how far apart the two
+        # views put the *brick*, in the plane the grasp happens in.
+        try:
+            point_1 = project_ray_onto_height(ray_1, brick_top_z)
+            point_2 = project_ray_onto_height(ray_2, brick_top_z)
+        except RuntimeError as exception:
+            logger.error(str(exception))
+            os._exit(1)
+
+        point = 0.5 * (point_1 + point_2)
+        view_disagreement = float(np.linalg.norm(point_1 - point_2))
+        logger.info(
+            f"View 1 puts the brick at {point_1.round(4)} m, view 2 at {point_2.round(4)} m; "
+            f"using their midpoint {point.round(4)} m (views disagree by {view_disagreement * 1000:.1f} mm)."
+        )
+        if view_disagreement > LARGE_VIEW_DISAGREEMENT:
+            logger.warning(
+                f"The two views disagree by {view_disagreement * 1000:.1f} mm (> "
+                f"{LARGE_VIEW_DISAGREEMENT * 1000:.0f} mm), which is wider than the 7.8 mm brick. Either the two "
+                "clicks were not on the same point, or the hand-eye calibration's lateral error is large. "
+                "Continuing with the midpoint, but expect the grasp to be off sideways."
+            )
+
+        # Triangulation is still computed, purely so the size of the disagreement is on the record: it
+        # is the number that used to drive the pregrasp, and it is why the pregrasp used to be wrong.
+        try:
+            triangulated, gap = triangulate_rays(ray_1, ray_2)
+            logger.info(
+                f"For reference, triangulating the two rays instead gives {triangulated.round(4)} m "
+                f"({(triangulated[2] - point[2]) * 100:+.1f} cm in z, "
+                f"{np.linalg.norm(triangulated[:2] - point[:2]) * 100:.1f} cm sideways), with the rays missing "
+                f"each other by {gap * 1000:.1f} mm. Not used."
+            )
+            if gap > LARGE_TRIANGULATION_GAP:
+                logger.info(
+                    f"Those rays miss by more than {LARGE_TRIANGULATION_GAP * 1000:.0f} mm, which is itself a "
+                    "sign the clicks or the calibration are off."
+                )
+        except RuntimeError as exception:
+            logger.debug(f"Reference triangulation unavailable: {exception}")
+
         pregrasp_position = point + np.array([0.0, 0.0, pregrasp_height])
+        logger.info(
+            f"Brick top face at z={brick_top_z:.4f} m (table {table_z:.4f} + brick {brick_height * 1000:.1f} mm); "
+            f"pregrasp {pregrasp_height * 100:.1f} cm above it."
+        )
         # The long pixel-selection pauses can leave the UR control script stopped, which makes the
         # reachability checks below (getInverseKinematics / isPoseWithinSafetyLimits) unreliable and
         # every pose look unreachable; re-arm it first.
