@@ -11,18 +11,19 @@ import numpy as np
 from airo_robots.manipulators.position_manipulator import PositionManipulator
 from loguru import logger
 
-# capture.py lives at src/capture.py; submodule_0 carries the connection/error-handling logic this
-# reuses and lives one level down, at src/m1/physical/submodule_0.py.
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "m1", "physical"))
-from submodule_0 import (  # noqa: E402
+# capture.py lives at src/capture.py, next to config.py. submodule_0 carries the connection/
+# error-handling logic this reuses and lives one level down, at src/m1/physical/submodule_0.py.
+_SRC_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(_SRC_DIR, "m1", "physical"))
+sys.path.insert(0, _SRC_DIR)
+from config import (  # noqa: E402
     CAMERA_RESOLUTIONS,
     DEFAULT_CAMERA_RESOLUTION,
     DEFAULT_IP_ADDRESSES,
     DEFAULT_REALMAN_PORT,
     SUPPORTED_ROBOT_TYPES,
-    connect_arm,
-    open_camera,
 )
+from submodule_0 import connect_arm, open_camera  # noqa: E402
 
 DEFAULT_OUTPUT_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lego_pic"))
 FILENAME_PREFIX = "lego_pile"
@@ -145,7 +146,7 @@ def draw_hud(
 )
 @click.option(
     "--ip-address",
-    default=DEFAULT_IP_ADDRESSES['ur3e'],
+    default=None,
     help="Robot controller IP address. Defaults per robot type "
     f"(ur3e: {DEFAULT_IP_ADDRESSES['ur3e']}, realman: {DEFAULT_IP_ADDRESSES['realman']}).",
 )
@@ -256,8 +257,6 @@ def main(
 
         logger.success(f"Session ended: {capture_count} picture(s) saved to {output_dir}.")
 
-    # The RealSense keeps non-daemon threads alive that can outlive the pipeline stop, so the process
-    # would otherwise hang here with the session already finished (same reason the m1 scripts do this).
     os._exit(0)
 
 

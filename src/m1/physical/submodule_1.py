@@ -37,8 +37,9 @@ depth-measured table and ``--table-z`` is printed every run precisely *because* 
 that bias -- if it reads 9 cm, the calibration is off by 9 cm along the camera's view direction.
 
 Connection, camera, calibration loading and reachable-orientation handling are reused from
-``submodule_0``; pose maths uses airo-mono's ``SE3Container`` and imaging uses airo-camera-toolkit.
-:mod:`submodule_2` picks up from the pregrasp pose this leaves the arm at.
+``submodule_0``; shared robot/camera/calibration constants come from ``config.py``. Pose maths uses
+airo-mono's ``SE3Container`` and imaging uses airo-camera-toolkit. :mod:`submodule_2` picks up from
+the pregrasp pose this leaves the arm at.
 """
 
 import os
@@ -55,57 +56,49 @@ from airo_spatial_algebra import SE3Container
 from airo_typing import CameraIntrinsicsMatrixType, HomogeneousMatrixType, NumpyIntImageType
 from loguru import logger
 
-# submodule_1 lives next to submodule_0; make sure it is importable when run as a script.
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from submodule_0 import (  # noqa: E402
+_PHYSICAL_DIR = os.path.dirname(os.path.abspath(__file__))
+_SRC_DIR = os.path.normpath(os.path.join(_PHYSICAL_DIR, "..", ".."))
+for _path in (_PHYSICAL_DIR, _SRC_DIR):
+    if _path not in sys.path:
+        sys.path.insert(0, _path)
+from config import (
+    APPROX_ARM_REACH,
     CAMERA_RESOLUTIONS,
     DEFAULT_CALIBRATION_DIR,
     DEFAULT_CAMERA_RESOLUTION,
     DEFAULT_IP_ADDRESSES,
     DEFAULT_REALMAN_PORT,
     SUPPORTED_ROBOT_TYPES,
+)
+from submodule_0 import (
     connect_arm,
     find_reachable_hover_orientation,
     load_camera_pose_in_tcp,
     open_camera,
 )
 
-# Joint configurations (radians) for the two viewpoints. Fill these in. They must be far enough
-# apart that the two lines of sight to the target have real parallax (see triangulate_rays()).
+# Joint configurations for triangulation
 POS1: List[float] = [-0.08343679, -1.31992237,  0.26209098, -0.40548201, -1.20620281, -1.63604099]
 POS2: List[float] = [0.81975543, -1.24165185,  0.23308164, -0.76548697, -1.72945053, -0.95741016]
 
-PREGRASP_HEIGHT = 0.03  # metres above the located brick top for the pregrasp pose.
-MAX_PREGRASP_HEIGHT = 0.05  # metres; a pregrasp higher than this is too far to descend from reliably.
-PARALLEL_RAY_EPS = 1e-6  # |1 - (da·db)^2| below this -> the two views are effectively collinear.
-LARGE_TRIANGULATION_GAP = 0.02  # metres between the two rays' closest points above which we warn.
+PREGRASP_HEIGHT = 0.03
+MAX_PREGRASP_HEIGHT = 0.05
+PARALLEL_RAY_EPS = 1e-6
+LARGE_TRIANGULATION_GAP = 0.02
 
-# Height of the table's surface in the robot's base frame. Zero because the UR3e's base frame origin
-# sits on its mounting surface, which is the same tabletop the bricks lie on; set --table-z if the
-# robot stands on a riser or the bricks are on a raised platform. This is the anchor that makes the
-# pregrasp height independent of the hand-eye calibration -- see the module docstring.
+# Height of the table's surface in the robot's base frame. 
 DEFAULT_TABLE_Z = 0.0
 
-# BrickLink 3622 "Brick 1 x 3" is 9.6 mm tall (a brick, not a plate), so its top face sits this far
-# above the table. Only the height matters here; submodule_2 owns the rest of the brick's geometry.
+# 3622
 BRICK_HEIGHT = 0.0096
 
-# Depth is only a cross-check here, but a cross-check needs enough measured pixels to be worth
-# printing. Below MIN_VALID_DEPTH metres the RealSense reports "no measurement", not a distance.
 MIN_VALID_DEPTH = 0.10
 MIN_TABLE_DEPTH_POINTS = 500
-# Gap between the depth-measured table and --table-z above which the hand-eye calibration is called
-# out as the likely cause, since nothing else in the chain can shift the table by this much.
 SUSPICIOUS_TABLE_DISAGREEMENT = 0.02
-# Two views' ray-plane intersections further apart than this mean the clicks are not on the same
-# point, or the calibration's lateral error is large enough to matter for a 7.8 mm-wide brick.
 LARGE_VIEW_DISAGREEMENT = 0.01
 
-# Rough maximum TCP reach from the base (metres), for an out-of-workspace warning/diagnosis.
-APPROX_ARM_REACH = {"ur3e": 0.66, "realman": 0.85}
-
-_CONFIRM_KEYS = (13, 10, 32)  # Enter (either code) or Space.
-_ABORT_KEYS = (27, ord("q"))  # Esc or q.
+_CONFIRM_KEYS = (13, 10, 32)
+_ABORT_KEYS = (27, ord("q"))
 
 
 def click_pixel(image_rgb: NumpyIntImageType, window_title: str) -> Tuple[int, int]:

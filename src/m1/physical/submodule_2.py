@@ -58,16 +58,21 @@ from airo_spatial_algebra import SE3Container
 from airo_typing import HomogeneousMatrixType
 from loguru import logger
 
-# submodule_2 lives next to submodule_0 and submodule_1; make them importable when run as a script.
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from submodule_0 import (  # noqa: E402
+# submodule_2 lives next to submodule_0 and submodule_1; config.py (the shared robot/camera/
+# calibration constants) lives two levels up, at the top of src/.
+_PHYSICAL_DIR = os.path.dirname(os.path.abspath(__file__))
+_SRC_DIR = os.path.normpath(os.path.join(_PHYSICAL_DIR, "..", ".."))
+for _path in (_PHYSICAL_DIR, _SRC_DIR):
+    if _path not in sys.path:
+        sys.path.insert(0, _path)
+from config import (
+    APPROX_ARM_REACH,
     DEFAULT_IP_ADDRESSES,
     DEFAULT_REALMAN_PORT,
     SUPPORTED_ROBOT_TYPES,
-    connect_arm,
 )
-from submodule_1 import (  # noqa: E402
-    APPROX_ARM_REACH,
+from submodule_0 import connect_arm
+from submodule_1 import (
     PREGRASP_HEIGHT,
     ensure_control_ready,
 )
@@ -110,10 +115,6 @@ WIDTH_TOLERANCE_BELOW_MM = 4.0
 WIDTH_TOLERANCE_ABOVE_MM = 6.0
 SETTLE_TIME = 1.0  # seconds to hold after the lift, so a slipping grasp has time to show itself
 
-# Which tool axis the 2F-85's fingers close along. Its knuckles rotate about the gripper base's x-axis
-# (see src/assets/robotiq_2f_85/urdf/robotiq_2f_85.urdf), so the pads travel along its y-axis; with the
-# standard UR coupling that is the tool's y-axis. Override with --closing-axis if the coupling is
-# rotated -- the wrong value reports (and aims) the finger direction 90 degrees out.
 CLOSING_AXIS_VECTORS = {"x": np.array([1.0, 0.0, 0.0]), "y": np.array([0.0, 1.0, 0.0])}
 DEFAULT_CLOSING_AXIS = "y"
 

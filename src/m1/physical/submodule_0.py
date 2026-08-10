@@ -2,6 +2,7 @@ import contextlib
 import glob
 import json
 import os
+import sys
 import time
 from typing import Iterator, Optional, Tuple
 
@@ -15,26 +16,21 @@ from airo_spatial_algebra import SE3Container
 from airo_typing import HomogeneousMatrixType, NumpyIntImageType
 from loguru import logger
 
-# The two supported arms share the airo-robots PositionManipulator interface, so everything below
-# the connection layer is robot-agnostic. Their drivers are imported lazily in create_arm() so a
-# machine set up for only one arm needn't have the other's (optional) driver installed.
-SUPPORTED_ROBOT_TYPES = ("ur3e", "realman")
-DEFAULT_IP_ADDRESSES = {"ur3e": "10.43.0.162", "realman": "192.168.1.18"}
-DEFAULT_REALMAN_PORT = 8080
+# submodule_0 lives two levels below src/; config.py (the shared robot/camera/calibration constants
+# every physical script uses) lives at the top of it.
+_SRC_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+if _SRC_DIR not in sys.path:
+    sys.path.insert(0, _SRC_DIR)
+from config import (  # noqa: E402
+    CAMERA_RESOLUTIONS,
+    DEFAULT_CALIBRATION_DIR,
+    DEFAULT_CAMERA_RESOLUTION,
+    DEFAULT_IP_ADDRESSES,
+    DEFAULT_REALMAN_PORT,
+    SUPPORTED_ROBOT_TYPES,
+)
 
-# Named RealSense colour resolutions (the wrapper picks the depth resolution itself). Lower is
-# lighter on USB bandwidth; a D415/D435 still needs a USB-3 link to stream colour+depth at all.
-CAMERA_RESOLUTIONS = {
-    "1080": Realsense.RESOLUTION_1080,
-    "720": Realsense.RESOLUTION_720,
-    "540": Realsense.RESOLUTION_540,
-    "480": Realsense.RESOLUTION_480,
-}
-DEFAULT_CAMERA_RESOLUTION = "720"
-
-DEFAULT_CALIBRATION_DIR = "/home/joon/int2026/calibration_dir"
-
-HOVER_ORIENTATION_EULER = np.array([0, np.pi, 0.0001]) 
+HOVER_ORIENTATION_EULER = np.array([0, np.pi, 0.0001])
 HOVER_YAW_CANDIDATES = np.linspace(0, 2 * np.pi, 8, endpoint=False)
 
 MIN_VALID_DEPTH = 0.10 
@@ -60,6 +56,10 @@ MIN_RELIABLE_DEPTH_DISTANCE = 0.30
 
 def create_arm(robot_type: str, ip_address: str, port: int) -> PositionManipulator:
     """Construct and connect the manipulator driver for ``robot_type``.
+
+    The two supported arms share the airo-robots PositionManipulator interface, so everything above
+    the connection layer is robot-agnostic. Each driver is imported lazily, right here, so a machine
+    set up for only one arm needn't have the other's (optional) driver installed.
 
     Args:
         robot_type: one of :data:`SUPPORTED_ROBOT_TYPES` (``"ur3e"`` or ``"realman"``).
@@ -110,12 +110,6 @@ def _disconnect_arm(arm: PositionManipulator) -> None:
 
 @contextlib.contextmanager
 def connect_arm(robot_type: str, ip_address: str, port: int) -> Iterator[PositionManipulator]:
-    """Yield a connected arm and guarantee it is released afterwards.
-
-    Presents both drivers behind one ``with`` block despite their differing lifecycles
-    (``RealmanControl`` is itself a context manager, ``URrtde`` is not), and turns a failed
-    connection into an actionable error rather than a raw driver traceback.
-    """
     logger.info(f"Connecting to {robot_type} arm at {ip_address}...")
     try:
         arm = create_arm(robot_type, ip_address, port)
