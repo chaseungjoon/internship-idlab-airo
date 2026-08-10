@@ -48,10 +48,8 @@ Lego bricks sorted by shape or shape and color
 
 - Implementation
     - Submodule 0: Grasp single standalone block
-        - eye_in_hand: need a proper camera mount
-        - eye_to_hand: not tried yet
-    - Submodule 1: Grasp a specific block from the pile
-    - Submodule 2: Identify which block to grasp from the pile
+    - Submodule 1: Go above a single brick from a pile, pre-grasp position
+    - Submodule 2: Grasp a brick from the pre-grasp position and lift up
 
 ### Module 2
 
