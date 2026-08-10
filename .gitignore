@@ -10,3 +10,5 @@ package-lock.json
 .vscode
 .env
 materials
+run/
+lego_3d/catalog.json
