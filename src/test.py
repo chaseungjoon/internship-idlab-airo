@@ -91,8 +91,6 @@ def main() -> None:
 
     gripper = Robotiq2F85(args.ip)
     gripper.open()
-    gripper.close()
-
 
 if __name__ == "__main__":
     main()
