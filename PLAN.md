@@ -50,6 +50,7 @@ Lego bricks sorted by shape or shape and color
     - Submodule 0: Grasp single standalone block
     - Submodule 1: Go above a single brick from a pile, pre-grasp position
     - Submodule 2: Grasp a brick from the pre-grasp position and lift up
+    - Submodule 3: Identify which brick to grasp from pile 
 
 ### Module 2
 

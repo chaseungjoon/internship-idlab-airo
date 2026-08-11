@@ -1,0 +1,3729 @@
+{
+  "schema": "pile_perception/1",
+  "generated_at": "2026-08-11T13:49:22+00:00",
+  "image": {
+    "path": "/home/chaseungjoon/idlab-airo/int2026/lego_pic/lego_pile_20260810_141044.jpg",
+    "name": "lego_pile_20260810_141044.jpg",
+    "width_px": 1280,
+    "height_px": 720
+  },
+  "scale": {
+    "mm_per_px": 0.3834,
+    "source": "lego_stud_pitch",
+    "stud_count": 35.0,
+    "stud_radius_px_median": 6.9,
+    "stud_pitch_samples": 13.0,
+    "stud_pitch_px_median": 20.8657,
+    "stud_pitch_relative_spread": 0.0189
+  },
+  "table": {
+    "area_px": 578968,
+    "quad_px": [
+      [
+        1138,
+        0
+      ],
+      [
+        1279,
+        719
+      ],
+      [
+        376,
+        719
+      ],
+      [
+        259,
+        170
+      ]
+    ]
+  },
+  "summary": {
+    "brick_count": 54,
+    "graspable_count": 46,
+    "unresolved_clump_count": 3,
+    "rejected_region_count": 37,
+    "rejected_reasons": {
+      "looks_like_table": 19,
+      "too_small": 15,
+      "shapeless_and_unconfident": 3
+    },
+    "colour_histogram": {
+      "light_grey": 16,
+      "sand_blue": 16,
+      "dark_grey": 13,
+      "dark_green": 4,
+      "black": 1,
+      "dark_tan": 1,
+      "reddish_brown": 1,
+      "brown": 1,
+      "white": 1
+    },
+    "brick_area_px_total": 116418.0,
+    "table_coverage_fraction": 0.2011,
+    "median_brick_width_px": 26.6,
+    "median_jaw_clearance_px": 0.0,
+    "isolated_brick_count": 1,
+    "pile_centroid_px": [
+      781.4,
+      370.4
+    ],
+    "pile_bbox_px": [
+      607.2,
+      108.4,
+      1029.8,
+      555.0
+    ]
+  },
+  "grasp_order": [
+    45,
+    6,
+    42,
+    2,
+    28
+  ],
+  "bricks": [
+    {
+      "id": 0,
+      "priority": null,
+      "confidence": 0.559,
+      "colour": {
+        "name": "dark_green",
+        "rgb": [
+          55,
+          58,
+          59
+        ]
+      },
+      "centroid_px": [
+        648.1,
+        108.4
+      ],
+      "area_px": 424.0,
+      "area_mm2": 62.3,
+      "obb": {
+        "center_px": [
+          652.0,
+          112.0
+        ],
+        "length_px": 32.0,
+        "width_px": 24.0,
+        "length_mm": 12.27,
+        "width_mm": 9.2,
+        "angle_deg": 0.0
+      },
+      "shape": {
+        "aspect_ratio": 1.33,
+        "rectangularity": 0.552,
+        "solidity": 0.854,
+        "studs_visible": 0,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 6.9,
+        "edge_support": 0.812,
+        "interior_texture": 1.533,
+        "isolation_px": 66.3,
+        "isolation_mm": 25.42,
+        "jaw_clearance_px": 53.8,
+        "jaw_clearance_mm": 20.61,
+        "exposed_perimeter_ratio": 1.0
+      },
+      "grasp": {
+        "point_px": [
+          652.0,
+          112.0
+        ],
+        "yaw_deg": 90.0,
+        "jaw_opening_px": 24.0,
+        "jaw_opening_mm": 9.2,
+        "feasible": true
+      },
+      "score": 0.8444,
+      "score_terms": {
+        "clearance": 1.0,
+        "isolation": 0.978,
+        "exposure": 1.0,
+        "visibility": 0.264,
+        "width_fit": 0.852,
+        "size": 0.24,
+        "confidence": 0.559
+      }
+    },
+    {
+      "id": 45,
+      "priority": 1,
+      "confidence": 0.944,
+      "colour": {
+        "name": "sand_blue",
+        "rgb": [
+          108,
+          166,
+          197
+        ]
+      },
+      "centroid_px": [
+        924.2,
+        546.3
+      ],
+      "area_px": 6553.0,
+      "area_mm2": 963.3,
+      "obb": {
+        "center_px": [
+          924.8,
+          545.4
+        ],
+        "length_px": 149.7,
+        "width_px": 50.7,
+        "length_mm": 57.41,
+        "width_mm": 19.43,
+        "angle_deg": 61.5
+      },
+      "shape": {
+        "aspect_ratio": 2.95,
+        "rectangularity": 0.863,
+        "solidity": 0.961,
+        "studs_visible": 0,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 18.5,
+        "edge_support": 0.65,
+        "interior_texture": 0.096,
+        "isolation_px": 2.7,
+        "isolation_mm": 1.05,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.774
+      },
+      "grasp": {
+        "point_px": [
+          924.8,
+          545.4
+        ],
+        "yaw_deg": 151.5,
+        "jaw_opening_px": 50.7,
+        "jaw_opening_mm": 19.43,
+        "feasible": true
+      },
+      "score": 0.5766,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.04,
+        "exposure": 0.774,
+        "visibility": 0.887,
+        "width_fit": 0.96,
+        "size": 1.0,
+        "confidence": 0.944
+      }
+    },
+    {
+      "id": 17,
+      "priority": null,
+      "confidence": 0.601,
+      "colour": {
+        "name": "light_grey",
+        "rgb": [
+          174,
+          200,
+          223
+        ]
+      },
+      "centroid_px": [
+        1029.8,
+        294.1
+      ],
+      "area_px": 1216.0,
+      "area_mm2": 178.7,
+      "obb": {
+        "center_px": [
+          1030.0,
+          294.5
+        ],
+        "length_px": 45.0,
+        "width_px": 28.0,
+        "length_mm": 17.25,
+        "width_mm": 10.74,
+        "angle_deg": 90.0
+      },
+      "shape": {
+        "aspect_ratio": 1.61,
+        "rectangularity": 0.965,
+        "solidity": 1.031,
+        "studs_visible": 0,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 8.8,
+        "edge_support": 0.719,
+        "interior_texture": 1.557,
+        "isolation_px": 1.0,
+        "isolation_mm": 0.37,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.839
+      },
+      "grasp": {
+        "point_px": [
+          1030.0,
+          294.5
+        ],
+        "yaw_deg": 0.0,
+        "jaw_opening_px": 28.0,
+        "jaw_opening_mm": 10.74,
+        "feasible": true
+      },
+      "score": 0.5251,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.014,
+        "exposure": 0.839,
+        "visibility": 1.0,
+        "width_fit": 0.908,
+        "size": 0.687,
+        "confidence": 0.601
+      }
+    },
+    {
+      "id": 6,
+      "priority": 2,
+      "confidence": 0.981,
+      "colour": {
+        "name": "sand_blue",
+        "rgb": [
+          78,
+          121,
+          142
+        ]
+      },
+      "centroid_px": [
+        761.3,
+        233.2
+      ],
+      "area_px": 1850.0,
+      "area_mm2": 271.9,
+      "obb": {
+        "center_px": [
+          760.1,
+          231.2
+        ],
+        "length_px": 48.1,
+        "width_px": 45.4,
+        "length_mm": 18.42,
+        "width_mm": 17.42,
+        "angle_deg": 49.4
+      },
+      "shape": {
+        "aspect_ratio": 1.06,
+        "rectangularity": 0.847,
+        "solidity": 0.929,
+        "studs_visible": 2,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 22.1,
+        "edge_support": 0.75,
+        "interior_texture": 0.291,
+        "isolation_px": 1.8,
+        "isolation_mm": 0.7,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.273
+      },
+      "grasp": {
+        "point_px": [
+          760.1,
+          231.2
+        ],
+        "yaw_deg": 139.4,
+        "jaw_opening_px": 45.4,
+        "jaw_opening_mm": 17.42,
+        "feasible": true
+      },
+      "score": 0.4869,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.027,
+        "exposure": 0.273,
+        "visibility": 0.854,
+        "width_fit": 0.993,
+        "size": 1.0,
+        "confidence": 0.981
+      }
+    },
+    {
+      "id": 42,
+      "priority": 3,
+      "confidence": 0.984,
+      "colour": {
+        "name": "brown",
+        "rgb": [
+          136,
+          106,
+          97
+        ]
+      },
+      "centroid_px": [
+        690.0,
+        515.5
+      ],
+      "area_px": 3308.0,
+      "area_mm2": 486.3,
+      "obb": {
+        "center_px": [
+          686.8,
+          511.4
+        ],
+        "length_px": 82.8,
+        "width_px": 52.7,
+        "length_mm": 31.76,
+        "width_mm": 20.22,
+        "angle_deg": 77.9
+      },
+      "shape": {
+        "aspect_ratio": 1.57,
+        "rectangularity": 0.757,
+        "solidity": 0.899,
+        "studs_visible": 0,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 11.6,
+        "edge_support": 0.852,
+        "interior_texture": 0.006,
+        "isolation_px": 0.0,
+        "isolation_mm": 0.0,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.456
+      },
+      "grasp": {
+        "point_px": [
+          686.8,
+          511.4
+        ],
+        "yaw_deg": 167.9,
+        "jaw_opening_px": 52.7,
+        "jaw_opening_mm": 20.22,
+        "feasible": true
+      },
+      "score": 0.483,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.0,
+        "exposure": 0.456,
+        "visibility": 0.675,
+        "width_fit": 0.94,
+        "size": 1.0,
+        "confidence": 0.984
+      }
+    },
+    {
+      "id": 2,
+      "priority": 4,
+      "confidence": 0.795,
+      "colour": {
+        "name": "black",
+        "rgb": [
+          66,
+          51,
+          46
+        ]
+      },
+      "centroid_px": [
+        638.4,
+        214.6
+      ],
+      "area_px": 2308.0,
+      "area_mm2": 339.3,
+      "obb": {
+        "center_px": [
+          634.1,
+          215.1
+        ],
+        "length_px": 85.3,
+        "width_px": 41.3,
+        "length_mm": 32.71,
+        "width_mm": 15.84,
+        "angle_deg": 143.7
+      },
+      "shape": {
+        "aspect_ratio": 2.07,
+        "rectangularity": 0.655,
+        "solidity": 0.83,
+        "studs_visible": 0,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 10.2,
+        "edge_support": 0.576,
+        "interior_texture": 0.452,
+        "isolation_px": 0.0,
+        "isolation_mm": 0.0,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.724
+      },
+      "grasp": {
+        "point_px": [
+          634.1,
+          215.1
+        ],
+        "yaw_deg": 53.7,
+        "jaw_opening_px": 41.3,
+        "jaw_opening_mm": 15.84,
+        "feasible": true
+      },
+      "score": 0.4768,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.0,
+        "exposure": 0.724,
+        "visibility": 0.47,
+        "width_fit": 1.0,
+        "size": 1.0,
+        "confidence": 0.795
+      }
+    },
+    {
+      "id": 28,
+      "priority": 5,
+      "confidence": 0.963,
+      "colour": {
+        "name": "dark_green",
+        "rgb": [
+          44,
+          77,
+          86
+        ]
+      },
+      "centroid_px": [
+        668.5,
+        382.9
+      ],
+      "area_px": 2504.0,
+      "area_mm2": 368.1,
+      "obb": {
+        "center_px": [
+          670.1,
+          380.7
+        ],
+        "length_px": 75.3,
+        "width_px": 44.6,
+        "length_mm": 28.86,
+        "width_mm": 17.09,
+        "angle_deg": 165.3
+      },
+      "shape": {
+        "aspect_ratio": 1.69,
+        "rectangularity": 0.746,
+        "solidity": 0.926,
+        "studs_visible": 1,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 27.5,
+        "edge_support": 0.701,
+        "interior_texture": 0.23,
+        "isolation_px": 0.0,
+        "isolation_mm": 0.0,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.405
+      },
+      "grasp": {
+        "point_px": [
+          670.1,
+          380.7
+        ],
+        "yaw_deg": 75.3,
+        "jaw_opening_px": 44.6,
+        "jaw_opening_mm": 17.09,
+        "feasible": true
+      },
+      "score": 0.4717,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.0,
+        "exposure": 0.405,
+        "visibility": 0.652,
+        "width_fit": 0.996,
+        "size": 1.0,
+        "confidence": 0.963
+      }
+    },
+    {
+      "id": 40,
+      "priority": null,
+      "confidence": 1.0,
+      "colour": {
+        "name": "sand_blue",
+        "rgb": [
+          97,
+          133,
+          148
+        ]
+      },
+      "centroid_px": [
+        858.2,
+        473.4
+      ],
+      "area_px": 2196.0,
+      "area_mm2": 322.8,
+      "obb": {
+        "center_px": [
+          858.9,
+          473.4
+        ],
+        "length_px": 50.6,
+        "width_px": 50.1,
+        "length_mm": 19.41,
+        "width_mm": 19.22,
+        "angle_deg": 147.1
+      },
+      "shape": {
+        "aspect_ratio": 1.01,
+        "rectangularity": 0.865,
+        "solidity": 0.978,
+        "studs_visible": 1,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 18.4,
+        "edge_support": 0.827,
+        "interior_texture": 0.107,
+        "isolation_px": 0.0,
+        "isolation_mm": 0.0,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.151
+      },
+      "grasp": {
+        "point_px": [
+          858.9,
+          473.4
+        ],
+        "yaw_deg": 57.1,
+        "jaw_opening_px": 50.1,
+        "jaw_opening_mm": 19.22,
+        "feasible": true
+      },
+      "score": 0.4668,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.0,
+        "exposure": 0.151,
+        "visibility": 0.891,
+        "width_fit": 0.965,
+        "size": 1.0,
+        "confidence": 1.0
+      }
+    },
+    {
+      "id": 4,
+      "priority": null,
+      "confidence": 0.648,
+      "colour": {
+        "name": "light_grey",
+        "rgb": [
+          141,
+          165,
+          175
+        ]
+      },
+      "centroid_px": [
+        720.1,
+        217.3
+      ],
+      "area_px": 1095.0,
+      "area_mm2": 161.0,
+      "obb": {
+        "center_px": [
+          719.7,
+          216.9
+        ],
+        "length_px": 40.4,
+        "width_px": 34.1,
+        "length_mm": 15.48,
+        "width_mm": 13.09,
+        "angle_deg": 145.5
+      },
+      "shape": {
+        "aspect_ratio": 1.18,
+        "rectangularity": 0.794,
+        "solidity": 0.968,
+        "studs_visible": 1,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 9.3,
+        "edge_support": 0.91,
+        "interior_texture": 1.11,
+        "isolation_px": 0.0,
+        "isolation_mm": 0.0,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.639
+      },
+      "grasp": {
+        "point_px": [
+          719.7,
+          216.9
+        ],
+        "yaw_deg": 55.5,
+        "jaw_opening_px": 34.1,
+        "jaw_opening_mm": 13.09,
+        "feasible": true
+      },
+      "score": 0.4527,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.0,
+        "exposure": 0.639,
+        "visibility": 0.748,
+        "width_fit": 0.971,
+        "size": 0.619,
+        "confidence": 0.648
+      }
+    },
+    {
+      "id": 38,
+      "priority": null,
+      "confidence": 0.969,
+      "colour": {
+        "name": "reddish_brown",
+        "rgb": [
+          99,
+          75,
+          64
+        ]
+      },
+      "centroid_px": [
+        648.4,
+        430.6
+      ],
+      "area_px": 2739.0,
+      "area_mm2": 402.6,
+      "obb": {
+        "center_px": [
+          647.6,
+          434.2
+        ],
+        "length_px": 73.1,
+        "width_px": 57.6,
+        "length_mm": 28.04,
+        "width_mm": 22.08,
+        "angle_deg": 20.0
+      },
+      "shape": {
+        "aspect_ratio": 1.27,
+        "rectangularity": 0.65,
+        "solidity": 0.863,
+        "studs_visible": 0,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 12.9,
+        "edge_support": 0.718,
+        "interior_texture": 0.013,
+        "isolation_px": 1.8,
+        "isolation_mm": 0.68,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.427
+      },
+      "grasp": {
+        "point_px": [
+          647.6,
+          434.2
+        ],
+        "yaw_deg": 110.0,
+        "jaw_opening_px": 57.6,
+        "jaw_opening_mm": 22.08,
+        "feasible": true
+      },
+      "score": 0.4409,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.026,
+        "exposure": 0.427,
+        "visibility": 0.461,
+        "width_fit": 0.88,
+        "size": 1.0,
+        "confidence": 0.969
+      }
+    },
+    {
+      "id": 8,
+      "priority": null,
+      "confidence": 1.0,
+      "colour": {
+        "name": "dark_grey",
+        "rgb": [
+          53,
+          79,
+          91
+        ]
+      },
+      "centroid_px": [
+        845.7,
+        232.6
+      ],
+      "area_px": 1150.0,
+      "area_mm2": 169.0,
+      "obb": {
+        "center_px": [
+          845.0,
+          232.8
+        ],
+        "length_px": 49.6,
+        "width_px": 28.5,
+        "length_mm": 19.0,
+        "width_mm": 10.94,
+        "angle_deg": 12.5
+      },
+      "shape": {
+        "aspect_ratio": 1.74,
+        "rectangularity": 0.813,
+        "solidity": 0.983,
+        "studs_visible": 1,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 18.5,
+        "edge_support": 0.855,
+        "interior_texture": 0.083,
+        "isolation_px": 0.5,
+        "isolation_mm": 0.21,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.246
+      },
+      "grasp": {
+        "point_px": [
+          845.0,
+          232.8
+        ],
+        "yaw_deg": 102.5,
+        "jaw_opening_px": 28.5,
+        "jaw_opening_mm": 10.94,
+        "feasible": true
+      },
+      "score": 0.4366,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.008,
+        "exposure": 0.246,
+        "visibility": 0.787,
+        "width_fit": 0.915,
+        "size": 0.65,
+        "confidence": 1.0
+      }
+    },
+    {
+      "id": 20,
+      "priority": null,
+      "confidence": 1.0,
+      "colour": {
+        "name": "light_grey",
+        "rgb": [
+          169,
+          215,
+          249
+        ]
+      },
+      "centroid_px": [
+        878.4,
+        300.5
+      ],
+      "area_px": 1300.0,
+      "area_mm2": 191.1,
+      "obb": {
+        "center_px": [
+          878.4,
+          300.0
+        ],
+        "length_px": 44.8,
+        "width_px": 32.1,
+        "length_mm": 17.17,
+        "width_mm": 12.29,
+        "angle_deg": 150.9
+      },
+      "shape": {
+        "aspect_ratio": 1.4,
+        "rectangularity": 0.906,
+        "solidity": 0.986,
+        "studs_visible": 0,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 12.5,
+        "edge_support": 1.132,
+        "interior_texture": 0.0,
+        "isolation_px": 0.0,
+        "isolation_mm": 0.0,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.0
+      },
+      "grasp": {
+        "point_px": [
+          878.4,
+          300.0
+        ],
+        "yaw_deg": 60.9,
+        "jaw_opening_px": 32.1,
+        "jaw_opening_mm": 12.29,
+        "feasible": true
+      },
+      "score": 0.4305,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.0,
+        "exposure": 0.0,
+        "visibility": 0.972,
+        "width_fit": 0.953,
+        "size": 0.735,
+        "confidence": 1.0
+      }
+    },
+    {
+      "id": 21,
+      "priority": null,
+      "confidence": 0.966,
+      "colour": {
+        "name": "light_grey",
+        "rgb": [
+          162,
+          207,
+          234
+        ]
+      },
+      "centroid_px": [
+        713.8,
+        311.4
+      ],
+      "area_px": 876.0,
+      "area_mm2": 128.8,
+      "obb": {
+        "center_px": [
+          713.8,
+          311.2
+        ],
+        "length_px": 44.0,
+        "width_px": 21.6,
+        "length_mm": 16.87,
+        "width_mm": 8.29,
+        "angle_deg": 52.8
+      },
+      "shape": {
+        "aspect_ratio": 2.04,
+        "rectangularity": 0.92,
+        "solidity": 0.993,
+        "studs_visible": 0,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 15.1,
+        "edge_support": 0.711,
+        "interior_texture": 0.0,
+        "isolation_px": 0.0,
+        "isolation_mm": 0.0,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.104
+      },
+      "grasp": {
+        "point_px": [
+          713.8,
+          311.2
+        ],
+        "yaw_deg": 142.8,
+        "jaw_opening_px": 21.6,
+        "jaw_opening_mm": 8.29,
+        "feasible": true
+      },
+      "score": 0.4188,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.0,
+        "exposure": 0.104,
+        "visibility": 1.0,
+        "width_fit": 0.814,
+        "size": 0.495,
+        "confidence": 0.966
+      }
+    },
+    {
+      "id": 19,
+      "priority": null,
+      "confidence": 0.677,
+      "colour": {
+        "name": "sand_blue",
+        "rgb": [
+          134,
+          137,
+          128
+        ]
+      },
+      "centroid_px": [
+        770.4,
+        283.8
+      ],
+      "area_px": 2044.0,
+      "area_mm2": 300.5,
+      "obb": {
+        "center_px": [
+          771.4,
+          275.6
+        ],
+        "length_px": 66.5,
+        "width_px": 49.2,
+        "length_mm": 25.5,
+        "width_mm": 18.85,
+        "angle_deg": 136.6
+      },
+      "shape": {
+        "aspect_ratio": 1.35,
+        "rectangularity": 0.625,
+        "solidity": 0.806,
+        "studs_visible": 3,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 4.5,
+        "edge_support": 0.693,
+        "interior_texture": 0.0,
+        "isolation_px": 0.0,
+        "isolation_mm": 0.0,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.55
+      },
+      "grasp": {
+        "point_px": [
+          771.4,
+          275.6
+        ],
+        "yaw_deg": 46.6,
+        "jaw_opening_px": 49.2,
+        "jaw_opening_mm": 18.85,
+        "feasible": true
+      },
+      "score": 0.4173,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.0,
+        "exposure": 0.55,
+        "visibility": 0.41,
+        "width_fit": 0.972,
+        "size": 1.0,
+        "confidence": 0.677
+      }
+    },
+    {
+      "id": 35,
+      "priority": null,
+      "confidence": 0.977,
+      "colour": {
+        "name": "dark_green",
+        "rgb": [
+          73,
+          65,
+          55
+        ]
+      },
+      "centroid_px": [
+        814.6,
+        415.9
+      ],
+      "area_px": 2023.0,
+      "area_mm2": 297.4,
+      "obb": {
+        "center_px": [
+          811.8,
+          418.4
+        ],
+        "length_px": 65.1,
+        "width_px": 44.9,
+        "length_mm": 24.98,
+        "width_mm": 17.22,
+        "angle_deg": 161.6
+      },
+      "shape": {
+        "aspect_ratio": 1.45,
+        "rectangularity": 0.692,
+        "solidity": 0.849,
+        "studs_visible": 0,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 12.3,
+        "edge_support": 0.74,
+        "interior_texture": 0.0,
+        "isolation_px": 0.0,
+        "isolation_mm": 0.0,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.138
+      },
+      "grasp": {
+        "point_px": [
+          811.8,
+          418.4
+        ],
+        "yaw_deg": 71.6,
+        "jaw_opening_px": 44.9,
+        "jaw_opening_mm": 17.22,
+        "feasible": true
+      },
+      "score": 0.4081,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.0,
+        "exposure": 0.138,
+        "visibility": 0.543,
+        "width_fit": 0.995,
+        "size": 1.0,
+        "confidence": 0.977
+      }
+    },
+    {
+      "id": 1,
+      "priority": null,
+      "confidence": 0.633,
+      "colour": {
+        "name": "light_grey",
+        "rgb": [
+          150,
+          166,
+          163
+        ]
+      },
+      "centroid_px": [
+        807.4,
+        197.6
+      ],
+      "area_px": 1886.0,
+      "area_mm2": 277.2,
+      "obb": {
+        "center_px": [
+          803.1,
+          204.8
+        ],
+        "length_px": 61.4,
+        "width_px": 48.1,
+        "length_mm": 23.54,
+        "width_mm": 18.45,
+        "angle_deg": 115.7
+      },
+      "shape": {
+        "aspect_ratio": 1.28,
+        "rectangularity": 0.638,
+        "solidity": 0.845,
+        "studs_visible": 0,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 5.2,
+        "edge_support": 0.647,
+        "interior_texture": 0.458,
+        "isolation_px": 0.0,
+        "isolation_mm": 0.0,
+        "jaw_clearance_px": 1.0,
+        "jaw_clearance_mm": 0.37,
+        "exposed_perimeter_ratio": 0.443
+      },
+      "grasp": {
+        "point_px": [
+          803.1,
+          204.8
+        ],
+        "yaw_deg": 25.7,
+        "jaw_opening_px": 48.1,
+        "jaw_opening_mm": 18.45,
+        "feasible": true
+      },
+      "score": 0.3966,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.0,
+        "exposure": 0.443,
+        "visibility": 0.437,
+        "width_fit": 0.979,
+        "size": 1.0,
+        "confidence": 0.633
+      }
+    },
+    {
+      "id": 22,
+      "priority": null,
+      "confidence": 0.962,
+      "colour": {
+        "name": "sand_blue",
+        "rgb": [
+          98,
+          146,
+          170
+        ]
+      },
+      "centroid_px": [
+        744.5,
+        313.5
+      ],
+      "area_px": 829.0,
+      "area_mm2": 121.9,
+      "obb": {
+        "center_px": [
+          742.3,
+          313.1
+        ],
+        "length_px": 36.6,
+        "width_px": 27.1,
+        "length_mm": 14.01,
+        "width_mm": 10.41,
+        "angle_deg": 46.6
+      },
+      "shape": {
+        "aspect_ratio": 1.35,
+        "rectangularity": 0.836,
+        "solidity": 0.982,
+        "studs_visible": 1,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 19.5,
+        "edge_support": 0.698,
+        "interior_texture": 0.0,
+        "isolation_px": 0.0,
+        "isolation_mm": 0.0,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.086
+      },
+      "grasp": {
+        "point_px": [
+          742.3,
+          313.1
+        ],
+        "yaw_deg": 136.6,
+        "jaw_opening_px": 27.1,
+        "jaw_opening_mm": 10.41,
+        "feasible": true
+      },
+      "score": 0.3923,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.0,
+        "exposure": 0.086,
+        "visibility": 0.831,
+        "width_fit": 0.897,
+        "size": 0.469,
+        "confidence": 0.962
+      }
+    },
+    {
+      "id": 23,
+      "priority": null,
+      "confidence": 0.539,
+      "colour": {
+        "name": "dark_grey",
+        "rgb": [
+          82,
+          74,
+          63
+        ]
+      },
+      "centroid_px": [
+        627.0,
+        300.3
+      ],
+      "area_px": 322.0,
+      "area_mm2": 47.3,
+      "obb": {
+        "center_px": [
+          628.3,
+          299.0
+        ],
+        "length_px": 37.8,
+        "width_px": 11.0,
+        "length_mm": 14.51,
+        "width_mm": 4.21,
+        "angle_deg": 166.6
+      },
+      "shape": {
+        "aspect_ratio": 3.45,
+        "rectangularity": 0.775,
+        "solidity": 0.998,
+        "studs_visible": 0,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 6.5,
+        "edge_support": 0.784,
+        "interior_texture": 1.013,
+        "isolation_px": 3.6,
+        "isolation_mm": 1.37,
+        "jaw_clearance_px": 6.6,
+        "jaw_clearance_mm": 2.51,
+        "exposed_perimeter_ratio": 0.714
+      },
+      "grasp": {
+        "point_px": [
+          628.3,
+          299.0
+        ],
+        "yaw_deg": 76.6,
+        "jaw_opening_px": 11.0,
+        "jaw_opening_mm": 4.21,
+        "feasible": true
+      },
+      "score": 0.39,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.053,
+        "exposure": 0.714,
+        "visibility": 0.71,
+        "width_fit": 0.617,
+        "size": 0.182,
+        "confidence": 0.539
+      }
+    },
+    {
+      "id": 50,
+      "priority": null,
+      "confidence": 0.629,
+      "colour": {
+        "name": "white",
+        "rgb": [
+          194,
+          241,
+          252
+        ]
+      },
+      "centroid_px": [
+        961.9,
+        528.7
+      ],
+      "area_px": 484.0,
+      "area_mm2": 71.1,
+      "obb": {
+        "center_px": [
+          960.8,
+          528.3
+        ],
+        "length_px": 27.2,
+        "width_px": 23.0,
+        "length_mm": 10.43,
+        "width_mm": 8.83,
+        "angle_deg": 162.5
+      },
+      "shape": {
+        "aspect_ratio": 1.18,
+        "rectangularity": 0.772,
+        "solidity": 0.904,
+        "studs_visible": 0,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 10.3,
+        "edge_support": 0.646,
+        "interior_texture": 1.241,
+        "isolation_px": 0.0,
+        "isolation_mm": 0.0,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.556
+      },
+      "grasp": {
+        "point_px": [
+          960.8,
+          528.3
+        ],
+        "yaw_deg": 72.5,
+        "jaw_opening_px": 23.0,
+        "jaw_opening_mm": 8.83,
+        "feasible": true
+      },
+      "score": 0.3896,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.0,
+        "exposure": 0.556,
+        "visibility": 0.705,
+        "width_fit": 0.837,
+        "size": 0.274,
+        "confidence": 0.629
+      }
+    },
+    {
+      "id": 14,
+      "priority": null,
+      "confidence": 0.584,
+      "colour": {
+        "name": "sand_blue",
+        "rgb": [
+          146,
+          155,
+          146
+        ]
+      },
+      "centroid_px": [
+        607.2,
+        260.8
+      ],
+      "area_px": 597.0,
+      "area_mm2": 87.8,
+      "obb": {
+        "center_px": [
+          606.3,
+          260.5
+        ],
+        "length_px": 38.8,
+        "width_px": 19.4,
+        "length_mm": 14.89,
+        "width_mm": 7.44,
+        "angle_deg": 56.3
+      },
+      "shape": {
+        "aspect_ratio": 2.0,
+        "rectangularity": 0.792,
+        "solidity": 0.988,
+        "studs_visible": 0,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 5.7,
+        "edge_support": 0.667,
+        "interior_texture": 0.662,
+        "isolation_px": 0.0,
+        "isolation_mm": 0.0,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.509
+      },
+      "grasp": {
+        "point_px": [
+          606.3,
+          260.5
+        ],
+        "yaw_deg": 146.3,
+        "jaw_opening_px": 19.4,
+        "jaw_opening_mm": 7.44,
+        "feasible": true
+      },
+      "score": 0.3814,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.0,
+        "exposure": 0.509,
+        "visibility": 0.744,
+        "width_fit": 0.776,
+        "size": 0.338,
+        "confidence": 0.584
+      }
+    },
+    {
+      "id": 27,
+      "priority": null,
+      "confidence": 0.946,
+      "colour": {
+        "name": "dark_green",
+        "rgb": [
+          50,
+          72,
+          87
+        ]
+      },
+      "centroid_px": [
+        692.7,
+        433.1
+      ],
+      "area_px": 2160.0,
+      "area_mm2": 317.5,
+      "obb": {
+        "center_px": [
+          683.3,
+          433.8
+        ],
+        "length_px": 99.0,
+        "width_px": 41.5,
+        "length_mm": 37.94,
+        "width_mm": 15.92,
+        "angle_deg": 132.5
+      },
+      "shape": {
+        "aspect_ratio": 2.38,
+        "rectangularity": 0.526,
+        "solidity": 0.756,
+        "studs_visible": 2,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 17.7,
+        "edge_support": 0.656,
+        "interior_texture": 0.023,
+        "isolation_px": 0.0,
+        "isolation_mm": 0.0,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.306
+      },
+      "grasp": {
+        "point_px": [
+          683.3,
+          433.8
+        ],
+        "yaw_deg": 42.5,
+        "jaw_opening_px": 41.5,
+        "jaw_opening_mm": 15.92,
+        "feasible": true
+      },
+      "score": 0.3813,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.0,
+        "exposure": 0.306,
+        "visibility": 0.211,
+        "width_fit": 1.0,
+        "size": 1.0,
+        "confidence": 0.946
+      }
+    },
+    {
+      "id": 13,
+      "priority": null,
+      "confidence": 0.78,
+      "colour": {
+        "name": "light_grey",
+        "rgb": [
+          149,
+          167,
+          164
+        ]
+      },
+      "centroid_px": [
+        699.5,
+        266.5
+      ],
+      "area_px": 1507.0,
+      "area_mm2": 221.5,
+      "obb": {
+        "center_px": [
+          699.5,
+          270.6
+        ],
+        "length_px": 57.3,
+        "width_px": 38.2,
+        "length_mm": 21.96,
+        "width_mm": 14.66,
+        "angle_deg": 65.6
+      },
+      "shape": {
+        "aspect_ratio": 1.5,
+        "rectangularity": 0.688,
+        "solidity": 0.932,
+        "studs_visible": 0,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 7.4,
+        "edge_support": 0.678,
+        "interior_texture": 0.0,
+        "isolation_px": 0.0,
+        "isolation_mm": 0.0,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.212
+      },
+      "grasp": {
+        "point_px": [
+          699.5,
+          270.6
+        ],
+        "yaw_deg": 155.6,
+        "jaw_opening_px": 38.2,
+        "jaw_opening_mm": 14.66,
+        "feasible": true
+      },
+      "score": 0.3808,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.0,
+        "exposure": 0.212,
+        "visibility": 0.536,
+        "width_fit": 0.994,
+        "size": 0.852,
+        "confidence": 0.78
+      }
+    },
+    {
+      "id": 24,
+      "priority": null,
+      "confidence": 0.729,
+      "colour": {
+        "name": "dark_tan",
+        "rgb": [
+          146,
+          142,
+          125
+        ]
+      },
+      "centroid_px": [
+        669.3,
+        338.0
+      ],
+      "area_px": 517.0,
+      "area_mm2": 76.0,
+      "obb": {
+        "center_px": [
+          670.2,
+          335.9
+        ],
+        "length_px": 27.3,
+        "width_px": 26.1,
+        "length_mm": 10.46,
+        "width_mm": 10.02,
+        "angle_deg": 74.7
+      },
+      "shape": {
+        "aspect_ratio": 1.04,
+        "rectangularity": 0.725,
+        "solidity": 0.979,
+        "studs_visible": 0,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 6.5,
+        "edge_support": 0.629,
+        "interior_texture": 0.0,
+        "isolation_px": 0.0,
+        "isolation_mm": 0.0,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.432
+      },
+      "grasp": {
+        "point_px": [
+          670.2,
+          335.9
+        ],
+        "yaw_deg": 164.7,
+        "jaw_opening_px": 26.1,
+        "jaw_opening_mm": 10.02,
+        "feasible": true
+      },
+      "score": 0.3715,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.0,
+        "exposure": 0.432,
+        "visibility": 0.61,
+        "width_fit": 0.883,
+        "size": 0.292,
+        "confidence": 0.729
+      }
+    },
+    {
+      "id": 9,
+      "priority": null,
+      "confidence": 0.754,
+      "colour": {
+        "name": "light_grey",
+        "rgb": [
+          152,
+          171,
+          169
+        ]
+      },
+      "centroid_px": [
+        733.6,
+        256.6
+      ],
+      "area_px": 1644.0,
+      "area_mm2": 241.7,
+      "obb": {
+        "center_px": [
+          733.3,
+          258.2
+        ],
+        "length_px": 60.6,
+        "width_px": 37.1,
+        "length_mm": 23.25,
+        "width_mm": 14.22,
+        "angle_deg": 51.1
+      },
+      "shape": {
+        "aspect_ratio": 1.64,
+        "rectangularity": 0.731,
+        "solidity": 0.915,
+        "studs_visible": 0,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 6.4,
+        "edge_support": 0.7,
+        "interior_texture": 0.0,
+        "isolation_px": 0.0,
+        "isolation_mm": 0.0,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.0
+      },
+      "grasp": {
+        "point_px": [
+          733.3,
+          258.2
+        ],
+        "yaw_deg": 141.1,
+        "jaw_opening_px": 37.1,
+        "jaw_opening_mm": 14.22,
+        "feasible": true
+      },
+      "score": 0.3586,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.0,
+        "exposure": 0.0,
+        "visibility": 0.623,
+        "width_fit": 0.989,
+        "size": 0.929,
+        "confidence": 0.754
+      }
+    },
+    {
+      "id": 52,
+      "priority": null,
+      "confidence": 0.618,
+      "colour": {
+        "name": "light_grey",
+        "rgb": [
+          164,
+          178,
+          179
+        ]
+      },
+      "centroid_px": [
+        751.1,
+        550.9
+      ],
+      "area_px": 404.0,
+      "area_mm2": 59.4,
+      "obb": {
+        "center_px": [
+          749.6,
+          551.4
+        ],
+        "length_px": 26.4,
+        "width_px": 19.4,
+        "length_mm": 10.11,
+        "width_mm": 7.44,
+        "angle_deg": 167.5
+      },
+      "shape": {
+        "aspect_ratio": 1.36,
+        "rectangularity": 0.789,
+        "solidity": 0.988,
+        "studs_visible": 0,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 4.4,
+        "edge_support": 0.54,
+        "interior_texture": 0.0,
+        "isolation_px": 0.4,
+        "isolation_mm": 0.15,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.382
+      },
+      "grasp": {
+        "point_px": [
+          749.6,
+          551.4
+        ],
+        "yaw_deg": 77.5,
+        "jaw_opening_px": 19.4,
+        "jaw_opening_mm": 7.44,
+        "feasible": true
+      },
+      "score": 0.3548,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.006,
+        "exposure": 0.382,
+        "visibility": 0.739,
+        "width_fit": 0.776,
+        "size": 0.228,
+        "confidence": 0.618
+      }
+    },
+    {
+      "id": 10,
+      "priority": null,
+      "confidence": 0.629,
+      "colour": {
+        "name": "dark_grey",
+        "rgb": [
+          121,
+          115,
+          105
+        ]
+      },
+      "centroid_px": [
+        667.7,
+        269.2
+      ],
+      "area_px": 1702.0,
+      "area_mm2": 250.2,
+      "obb": {
+        "center_px": [
+          666.4,
+          267.2
+        ],
+        "length_px": 94.8,
+        "width_px": 23.3,
+        "length_mm": 36.34,
+        "width_mm": 8.92,
+        "angle_deg": 47.7
+      },
+      "shape": {
+        "aspect_ratio": 4.07,
+        "rectangularity": 0.772,
+        "solidity": 0.856,
+        "studs_visible": 0,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 2.2,
+        "edge_support": 0.79,
+        "interior_texture": 0.0,
+        "isolation_px": 0.0,
+        "isolation_mm": 0.0,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.053
+      },
+      "grasp": {
+        "point_px": [
+          666.4,
+          267.2
+        ],
+        "yaw_deg": 137.7,
+        "jaw_opening_px": 23.3,
+        "jaw_opening_mm": 8.92,
+        "feasible": true
+      },
+      "score": 0.3543,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.0,
+        "exposure": 0.053,
+        "visibility": 0.703,
+        "width_fit": 0.84,
+        "size": 0.962,
+        "confidence": 0.629
+      }
+    },
+    {
+      "id": 46,
+      "priority": null,
+      "confidence": 0.865,
+      "colour": {
+        "name": "dark_grey",
+        "rgb": [
+          123,
+          105,
+          96
+        ]
+      },
+      "centroid_px": [
+        845.1,
+        528.1
+      ],
+      "area_px": 3925.0,
+      "area_mm2": 577.0,
+      "obb": {
+        "center_px": [
+          848.8,
+          523.3
+        ],
+        "length_px": 77.8,
+        "width_px": 71.1,
+        "length_mm": 29.83,
+        "width_mm": 27.26,
+        "angle_deg": 92.5
+      },
+      "shape": {
+        "aspect_ratio": 1.09,
+        "rectangularity": 0.71,
+        "solidity": 0.836,
+        "studs_visible": 1,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 8.4,
+        "edge_support": 0.954,
+        "interior_texture": 0.0,
+        "isolation_px": 0.0,
+        "isolation_mm": 0.0,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.0
+      },
+      "grasp": {
+        "point_px": [
+          848.8,
+          523.3
+        ],
+        "yaw_deg": 2.5,
+        "jaw_opening_px": 71.1,
+        "jaw_opening_mm": 27.26,
+        "feasible": true
+      },
+      "score": 0.3453,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.0,
+        "exposure": 0.0,
+        "visibility": 0.579,
+        "width_fit": 0.644,
+        "size": 1.0,
+        "confidence": 0.865
+      }
+    },
+    {
+      "id": 25,
+      "priority": null,
+      "confidence": 0.605,
+      "colour": {
+        "name": "sand_blue",
+        "rgb": [
+          138,
+          136,
+          128
+        ]
+      },
+      "centroid_px": [
+        734.2,
+        352.3
+      ],
+      "area_px": 820.0,
+      "area_mm2": 120.5,
+      "obb": {
+        "center_px": [
+          734.2,
+          352.3
+        ],
+        "length_px": 56.5,
+        "width_px": 16.5,
+        "length_mm": 21.66,
+        "width_mm": 6.31,
+        "angle_deg": 50.7
+      },
+      "shape": {
+        "aspect_ratio": 3.43,
+        "rectangularity": 0.882,
+        "solidity": 0.957,
+        "studs_visible": 0,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 2.0,
+        "edge_support": 0.743,
+        "interior_texture": 0.0,
+        "isolation_px": 0.0,
+        "isolation_mm": 0.0,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.06
+      },
+      "grasp": {
+        "point_px": [
+          734.2,
+          352.3
+        ],
+        "yaw_deg": 140.7,
+        "jaw_opening_px": 16.5,
+        "jaw_opening_mm": 6.31,
+        "feasible": true
+      },
+      "score": 0.338,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.0,
+        "exposure": 0.06,
+        "visibility": 0.923,
+        "width_fit": 0.722,
+        "size": 0.464,
+        "confidence": 0.605
+      }
+    },
+    {
+      "id": 26,
+      "priority": null,
+      "confidence": 0.816,
+      "colour": {
+        "name": "dark_grey",
+        "rgb": [
+          112,
+          106,
+          91
+        ]
+      },
+      "centroid_px": [
+        675.2,
+        355.4
+      ],
+      "area_px": 392.0,
+      "area_mm2": 57.6,
+      "obb": {
+        "center_px": [
+          676.3,
+          354.6
+        ],
+        "length_px": 30.4,
+        "width_px": 15.7,
+        "length_mm": 11.66,
+        "width_mm": 6.0,
+        "angle_deg": 153.4
+      },
+      "shape": {
+        "aspect_ratio": 1.94,
+        "rectangularity": 0.824,
+        "solidity": 1.032,
+        "studs_visible": 0,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 7.1,
+        "edge_support": 0.892,
+        "interior_texture": 0.0,
+        "isolation_px": 0.0,
+        "isolation_mm": 0.0,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.111
+      },
+      "grasp": {
+        "point_px": [
+          676.3,
+          354.6
+        ],
+        "yaw_deg": 63.4,
+        "jaw_opening_px": 15.7,
+        "jaw_opening_mm": 6.0,
+        "feasible": true
+      },
+      "score": 0.3377,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.0,
+        "exposure": 0.111,
+        "visibility": 0.807,
+        "width_fit": 0.707,
+        "size": 0.222,
+        "confidence": 0.816
+      }
+    },
+    {
+      "id": 48,
+      "priority": null,
+      "confidence": 0.537,
+      "colour": {
+        "name": "light_grey",
+        "rgb": [
+          165,
+          202,
+          227
+        ]
+      },
+      "centroid_px": [
+        956.4,
+        506.1
+      ],
+      "area_px": 452.0,
+      "area_mm2": 66.4,
+      "obb": {
+        "center_px": [
+          957.0,
+          504.5
+        ],
+        "length_px": 34.7,
+        "width_px": 17.0,
+        "length_mm": 13.3,
+        "width_mm": 6.51,
+        "angle_deg": 72.9
+      },
+      "shape": {
+        "aspect_ratio": 2.04,
+        "rectangularity": 0.767,
+        "solidity": 1.002,
+        "studs_visible": 2,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 8.7,
+        "edge_support": 0.56,
+        "interior_texture": 1.226,
+        "isolation_px": 0.0,
+        "isolation_mm": 0.0,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.383
+      },
+      "grasp": {
+        "point_px": [
+          957.0,
+          504.5
+        ],
+        "yaw_deg": 162.9,
+        "jaw_opening_px": 17.0,
+        "jaw_opening_mm": 6.51,
+        "feasible": true
+      },
+      "score": 0.3341,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.0,
+        "exposure": 0.383,
+        "visibility": 0.694,
+        "width_fit": 0.732,
+        "size": 0.256,
+        "confidence": 0.537
+      }
+    },
+    {
+      "id": 39,
+      "priority": null,
+      "confidence": 0.782,
+      "colour": {
+        "name": "light_grey",
+        "rgb": [
+          156,
+          176,
+          175
+        ]
+      },
+      "centroid_px": [
+        807.7,
+        447.0
+      ],
+      "area_px": 1119.0,
+      "area_mm2": 164.5,
+      "obb": {
+        "center_px": [
+          806.1,
+          448.1
+        ],
+        "length_px": 47.8,
+        "width_px": 32.8,
+        "length_mm": 18.33,
+        "width_mm": 12.57,
+        "angle_deg": 30.6
+      },
+      "shape": {
+        "aspect_ratio": 1.46,
+        "rectangularity": 0.714,
+        "solidity": 0.913,
+        "studs_visible": 0,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 6.5,
+        "edge_support": 0.769,
+        "interior_texture": 0.0,
+        "isolation_px": 0.0,
+        "isolation_mm": 0.0,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.0
+      },
+      "grasp": {
+        "point_px": [
+          806.1,
+          448.1
+        ],
+        "yaw_deg": 120.6,
+        "jaw_opening_px": 32.8,
+        "jaw_opening_mm": 12.57,
+        "feasible": true
+      },
+      "score": 0.3308,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.0,
+        "exposure": 0.0,
+        "visibility": 0.587,
+        "width_fit": 0.96,
+        "size": 0.633,
+        "confidence": 0.782
+      }
+    },
+    {
+      "id": 16,
+      "priority": null,
+      "confidence": 0.603,
+      "colour": {
+        "name": "light_grey",
+        "rgb": [
+          154,
+          168,
+          167
+        ]
+      },
+      "centroid_px": [
+        911.3,
+        272.3
+      ],
+      "area_px": 411.0,
+      "area_mm2": 60.4,
+      "obb": {
+        "center_px": [
+          913.4,
+          273.8
+        ],
+        "length_px": 29.5,
+        "width_px": 21.8,
+        "length_mm": 11.33,
+        "width_mm": 8.38,
+        "angle_deg": 24.4
+      },
+      "shape": {
+        "aspect_ratio": 1.35,
+        "rectangularity": 0.637,
+        "solidity": 0.887,
+        "studs_visible": 0,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 3.6,
+        "edge_support": 0.755,
+        "interior_texture": 0.483,
+        "isolation_px": 2.7,
+        "isolation_mm": 1.05,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.471
+      },
+      "grasp": {
+        "point_px": [
+          913.4,
+          273.8
+        ],
+        "yaw_deg": 114.4,
+        "jaw_opening_px": 21.8,
+        "jaw_opening_mm": 8.38,
+        "feasible": true
+      },
+      "score": 0.3289,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.04,
+        "exposure": 0.471,
+        "visibility": 0.433,
+        "width_fit": 0.817,
+        "size": 0.232,
+        "confidence": 0.603
+      }
+    },
+    {
+      "id": 7,
+      "priority": null,
+      "confidence": 0.915,
+      "colour": {
+        "name": "sand_blue",
+        "rgb": [
+          119,
+          164,
+          192
+        ]
+      },
+      "centroid_px": [
+        810.7,
+        233.3
+      ],
+      "area_px": 483.0,
+      "area_mm2": 71.0,
+      "obb": {
+        "center_px": [
+          811.5,
+          232.7
+        ],
+        "length_px": 28.5,
+        "width_px": 22.3,
+        "length_mm": 10.91,
+        "width_mm": 8.56,
+        "angle_deg": 132.3
+      },
+      "shape": {
+        "aspect_ratio": 1.27,
+        "rectangularity": 0.76,
+        "solidity": 0.952,
+        "studs_visible": 0,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 17.5,
+        "edge_support": 0.574,
+        "interior_texture": 0.0,
+        "isolation_px": 0.0,
+        "isolation_mm": 0.0,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.0
+      },
+      "grasp": {
+        "point_px": [
+          811.5,
+          232.7
+        ],
+        "yaw_deg": 42.3,
+        "jaw_opening_px": 22.3,
+        "jaw_opening_mm": 8.56,
+        "feasible": true
+      },
+      "score": 0.3248,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.0,
+        "exposure": 0.0,
+        "visibility": 0.68,
+        "width_fit": 0.825,
+        "size": 0.273,
+        "confidence": 0.915
+      }
+    },
+    {
+      "id": 51,
+      "priority": null,
+      "confidence": 0.687,
+      "colour": {
+        "name": "light_grey",
+        "rgb": [
+          172,
+          184,
+          182
+        ]
+      },
+      "centroid_px": [
+        878.2,
+        544.5
+      ],
+      "area_px": 633.0,
+      "area_mm2": 93.0,
+      "obb": {
+        "center_px": [
+          877.7,
+          544.4
+        ],
+        "length_px": 41.7,
+        "width_px": 25.0,
+        "length_mm": 15.99,
+        "width_mm": 9.59,
+        "angle_deg": 93.8
+      },
+      "shape": {
+        "aspect_ratio": 1.67,
+        "rectangularity": 0.607,
+        "solidity": 0.809,
+        "studs_visible": 0,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 4.5,
+        "edge_support": 0.719,
+        "interior_texture": 0.0,
+        "isolation_px": 0.0,
+        "isolation_mm": 0.0,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.333
+      },
+      "grasp": {
+        "point_px": [
+          877.7,
+          544.4
+        ],
+        "yaw_deg": 3.8,
+        "jaw_opening_px": 25.0,
+        "jaw_opening_mm": 9.59,
+        "feasible": true
+      },
+      "score": 0.3139,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.0,
+        "exposure": 0.333,
+        "visibility": 0.374,
+        "width_fit": 0.867,
+        "size": 0.358,
+        "confidence": 0.687
+      }
+    },
+    {
+      "id": 47,
+      "priority": null,
+      "confidence": 0.46,
+      "colour": {
+        "name": "light_grey",
+        "rgb": [
+          145,
+          164,
+          183
+        ]
+      },
+      "centroid_px": [
+        943.9,
+        509.9
+      ],
+      "area_px": 373.0,
+      "area_mm2": 54.8,
+      "obb": {
+        "center_px": [
+          944.8,
+          512.6
+        ],
+        "length_px": 43.4,
+        "width_px": 11.2,
+        "length_mm": 16.63,
+        "width_mm": 4.28,
+        "angle_deg": 72.8
+      },
+      "shape": {
+        "aspect_ratio": 3.88,
+        "rectangularity": 0.77,
+        "solidity": 0.903,
+        "studs_visible": 0,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 6.6,
+        "edge_support": 0.569,
+        "interior_texture": 1.739,
+        "isolation_px": 1.5,
+        "isolation_mm": 0.57,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.327
+      },
+      "grasp": {
+        "point_px": [
+          944.8,
+          512.6
+        ],
+        "yaw_deg": 162.8,
+        "jaw_opening_px": 11.2,
+        "jaw_opening_mm": 4.28,
+        "feasible": true
+      },
+      "score": 0.3054,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.022,
+        "exposure": 0.327,
+        "visibility": 0.701,
+        "width_fit": 0.621,
+        "size": 0.211,
+        "confidence": 0.46
+      }
+    },
+    {
+      "id": 34,
+      "priority": null,
+      "confidence": 0.872,
+      "colour": {
+        "name": "dark_grey",
+        "rgb": [
+          85,
+          74,
+          64
+        ]
+      },
+      "centroid_px": [
+        839.2,
+        445.1
+      ],
+      "area_px": 534.0,
+      "area_mm2": 78.5,
+      "obb": {
+        "center_px": [
+          838.8,
+          446.1
+        ],
+        "length_px": 30.8,
+        "width_px": 25.3,
+        "length_mm": 11.82,
+        "width_mm": 9.69,
+        "angle_deg": 159.1
+      },
+      "shape": {
+        "aspect_ratio": 1.22,
+        "rectangularity": 0.685,
+        "solidity": 0.832,
+        "studs_visible": 0,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 8.6,
+        "edge_support": 0.981,
+        "interior_texture": 0.0,
+        "isolation_px": 0.0,
+        "isolation_mm": 0.0,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.0
+      },
+      "grasp": {
+        "point_px": [
+          838.8,
+          446.1
+        ],
+        "yaw_deg": 69.1,
+        "jaw_opening_px": 25.3,
+        "jaw_opening_mm": 9.69,
+        "feasible": true
+      },
+      "score": 0.3008,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.0,
+        "exposure": 0.0,
+        "visibility": 0.53,
+        "width_fit": 0.871,
+        "size": 0.302,
+        "confidence": 0.872
+      }
+    },
+    {
+      "id": 31,
+      "priority": null,
+      "confidence": 0.608,
+      "colour": {
+        "name": "sand_blue",
+        "rgb": [
+          130,
+          136,
+          131
+        ]
+      },
+      "centroid_px": [
+        778.4,
+        392.3
+      ],
+      "area_px": 1095.0,
+      "area_mm2": 161.0,
+      "obb": {
+        "center_px": [
+          779.2,
+          391.4
+        ],
+        "length_px": 46.1,
+        "width_px": 34.9,
+        "length_mm": 17.67,
+        "width_mm": 13.39,
+        "angle_deg": 50.0
+      },
+      "shape": {
+        "aspect_ratio": 1.32,
+        "rectangularity": 0.68,
+        "solidity": 0.905,
+        "studs_visible": 0,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 3.8,
+        "edge_support": 0.578,
+        "interior_texture": 0.0,
+        "isolation_px": 0.0,
+        "isolation_mm": 0.0,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.016
+      },
+      "grasp": {
+        "point_px": [
+          779.2,
+          391.4
+        ],
+        "yaw_deg": 140.0,
+        "jaw_opening_px": 34.9,
+        "jaw_opening_mm": 13.39,
+        "feasible": true
+      },
+      "score": 0.299,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.0,
+        "exposure": 0.016,
+        "visibility": 0.521,
+        "width_fit": 0.977,
+        "size": 0.619,
+        "confidence": 0.608
+      }
+    },
+    {
+      "id": 18,
+      "priority": null,
+      "confidence": 0.915,
+      "colour": {
+        "name": "sand_blue",
+        "rgb": [
+          99,
+          143,
+          165
+        ]
+      },
+      "centroid_px": [
+        726.3,
+        291.4
+      ],
+      "area_px": 530.0,
+      "area_mm2": 77.9,
+      "obb": {
+        "center_px": [
+          727.2,
+          291.9
+        ],
+        "length_px": 37.6,
+        "width_px": 22.7,
+        "length_mm": 14.43,
+        "width_mm": 8.7,
+        "angle_deg": 99.5
+      },
+      "shape": {
+        "aspect_ratio": 1.66,
+        "rectangularity": 0.621,
+        "solidity": 0.908,
+        "studs_visible": 0,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 19.6,
+        "edge_support": 0.573,
+        "interior_texture": 0.0,
+        "isolation_px": 0.0,
+        "isolation_mm": 0.0,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.0
+      },
+      "grasp": {
+        "point_px": [
+          727.2,
+          291.9
+        ],
+        "yaw_deg": 9.5,
+        "jaw_opening_px": 22.7,
+        "jaw_opening_mm": 8.7,
+        "feasible": true
+      },
+      "score": 0.2827,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.0,
+        "exposure": 0.0,
+        "visibility": 0.401,
+        "width_fit": 0.831,
+        "size": 0.3,
+        "confidence": 0.915
+      }
+    },
+    {
+      "id": 3,
+      "priority": null,
+      "confidence": 0.631,
+      "colour": {
+        "name": "dark_grey",
+        "rgb": [
+          118,
+          117,
+          110
+        ]
+      },
+      "centroid_px": [
+        785.2,
+        213.3
+      ],
+      "area_px": 554.0,
+      "area_mm2": 81.4,
+      "obb": {
+        "center_px": [
+          787.5,
+          211.6
+        ],
+        "length_px": 34.5,
+        "width_px": 22.7,
+        "length_mm": 13.22,
+        "width_mm": 8.69,
+        "angle_deg": 48.0
+      },
+      "shape": {
+        "aspect_ratio": 1.52,
+        "rectangularity": 0.709,
+        "solidity": 0.843,
+        "studs_visible": 1,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 2.2,
+        "edge_support": 0.874,
+        "interior_texture": 0.0,
+        "isolation_px": 0.0,
+        "isolation_mm": 0.0,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.045
+      },
+      "grasp": {
+        "point_px": [
+          787.5,
+          211.6
+        ],
+        "yaw_deg": 138.0,
+        "jaw_opening_px": 22.7,
+        "jaw_opening_mm": 8.69,
+        "feasible": true
+      },
+      "score": 0.2804,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.0,
+        "exposure": 0.045,
+        "visibility": 0.577,
+        "width_fit": 0.831,
+        "size": 0.313,
+        "confidence": 0.631
+      }
+    },
+    {
+      "id": 36,
+      "priority": null,
+      "confidence": 0.682,
+      "colour": {
+        "name": "light_grey",
+        "rgb": [
+          170,
+          186,
+          183
+        ]
+      },
+      "centroid_px": [
+        851.0,
+        410.3
+      ],
+      "area_px": 393.0,
+      "area_mm2": 57.8,
+      "obb": {
+        "center_px": [
+          852.1,
+          408.9
+        ],
+        "length_px": 27.3,
+        "width_px": 19.7,
+        "length_mm": 10.47,
+        "width_mm": 7.56,
+        "angle_deg": 139.8
+      },
+      "shape": {
+        "aspect_ratio": 1.38,
+        "rectangularity": 0.729,
+        "solidity": 0.948,
+        "studs_visible": 1,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 4.6,
+        "edge_support": 0.689,
+        "interior_texture": 0.0,
+        "isolation_px": 0.0,
+        "isolation_mm": 0.0,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.0
+      },
+      "grasp": {
+        "point_px": [
+          852.1,
+          408.9
+        ],
+        "yaw_deg": 49.8,
+        "jaw_opening_px": 19.7,
+        "jaw_opening_mm": 7.56,
+        "feasible": true
+      },
+      "score": 0.2748,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.0,
+        "exposure": 0.0,
+        "visibility": 0.619,
+        "width_fit": 0.781,
+        "size": 0.222,
+        "confidence": 0.682
+      }
+    },
+    {
+      "id": 49,
+      "priority": null,
+      "confidence": 0.562,
+      "colour": {
+        "name": "sand_blue",
+        "rgb": [
+          120,
+          126,
+          126
+        ]
+      },
+      "centroid_px": [
+        763.2,
+        526.1
+      ],
+      "area_px": 846.0,
+      "area_mm2": 124.4,
+      "obb": {
+        "center_px": [
+          762.6,
+          527.2
+        ],
+        "length_px": 50.8,
+        "width_px": 32.0,
+        "length_mm": 19.46,
+        "width_mm": 12.27,
+        "angle_deg": 139.4
+      },
+      "shape": {
+        "aspect_ratio": 1.59,
+        "rectangularity": 0.521,
+        "solidity": 0.681,
+        "studs_visible": 0,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 2.3,
+        "edge_support": 0.608,
+        "interior_texture": 0.0,
+        "isolation_px": 0.0,
+        "isolation_mm": 0.0,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.173
+      },
+      "grasp": {
+        "point_px": [
+          762.6,
+          527.2
+        ],
+        "yaw_deg": 49.4,
+        "jaw_opening_px": 32.0,
+        "jaw_opening_mm": 12.27,
+        "feasible": true
+      },
+      "score": 0.2567,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.0,
+        "exposure": 0.173,
+        "visibility": 0.202,
+        "width_fit": 0.953,
+        "size": 0.478,
+        "confidence": 0.562
+      }
+    },
+    {
+      "id": 41,
+      "priority": null,
+      "confidence": 0.693,
+      "colour": {
+        "name": "sand_blue",
+        "rgb": [
+          151,
+          154,
+          150
+        ]
+      },
+      "centroid_px": [
+        812.0,
+        471.2
+      ],
+      "area_px": 663.0,
+      "area_mm2": 97.5,
+      "obb": {
+        "center_px": [
+          811.4,
+          472.3
+        ],
+        "length_px": 40.7,
+        "width_px": 27.7,
+        "length_mm": 15.62,
+        "width_mm": 10.64,
+        "angle_deg": 178.0
+      },
+      "shape": {
+        "aspect_ratio": 1.47,
+        "rectangularity": 0.587,
+        "solidity": 0.766,
+        "studs_visible": 0,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 3.8,
+        "edge_support": 0.832,
+        "interior_texture": 0.0,
+        "isolation_px": 0.0,
+        "isolation_mm": 0.0,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.0
+      },
+      "grasp": {
+        "point_px": [
+          811.4,
+          472.3
+        ],
+        "yaw_deg": 88.0,
+        "jaw_opening_px": 27.7,
+        "jaw_opening_mm": 10.64,
+        "feasible": true
+      },
+      "score": 0.2528,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.0,
+        "exposure": 0.0,
+        "visibility": 0.333,
+        "width_fit": 0.905,
+        "size": 0.375,
+        "confidence": 0.693
+      }
+    },
+    {
+      "id": 37,
+      "priority": null,
+      "confidence": 0.662,
+      "colour": {
+        "name": "dark_grey",
+        "rgb": [
+          115,
+          116,
+          108
+        ]
+      },
+      "centroid_px": [
+        675.7,
+        409.0
+      ],
+      "area_px": 712.0,
+      "area_mm2": 104.7,
+      "obb": {
+        "center_px": [
+          673.2,
+          413.3
+        ],
+        "length_px": 37.9,
+        "width_px": 32.6,
+        "length_mm": 14.55,
+        "width_mm": 12.49,
+        "angle_deg": 148.7
+      },
+      "shape": {
+        "aspect_ratio": 1.16,
+        "rectangularity": 0.576,
+        "solidity": 0.851,
+        "studs_visible": 0,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 3.4,
+        "edge_support": 0.757,
+        "interior_texture": 0.0,
+        "isolation_px": 0.0,
+        "isolation_mm": 0.0,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.0
+      },
+      "grasp": {
+        "point_px": [
+          673.2,
+          413.3
+        ],
+        "yaw_deg": 58.7,
+        "jaw_opening_px": 32.6,
+        "jaw_opening_mm": 12.49,
+        "feasible": true
+      },
+      "score": 0.2514,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.0,
+        "exposure": 0.0,
+        "visibility": 0.312,
+        "width_fit": 0.958,
+        "size": 0.403,
+        "confidence": 0.662
+      }
+    },
+    {
+      "id": 29,
+      "priority": null,
+      "confidence": 0.534,
+      "colour": {
+        "name": "sand_blue",
+        "rgb": [
+          134,
+          130,
+          121
+        ]
+      },
+      "centroid_px": [
+        761.9,
+        375.1
+      ],
+      "area_px": 361.0,
+      "area_mm2": 53.1,
+      "obb": {
+        "center_px": [
+          762.6,
+          374.8
+        ],
+        "length_px": 37.2,
+        "width_px": 13.3,
+        "length_mm": 14.25,
+        "width_mm": 5.09,
+        "angle_deg": 167.0
+      },
+      "shape": {
+        "aspect_ratio": 2.8,
+        "rectangularity": 0.732,
+        "solidity": 0.829,
+        "studs_visible": 0,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 3.2,
+        "edge_support": 0.439,
+        "interior_texture": 0.0,
+        "isolation_px": 0.0,
+        "isolation_mm": 0.0,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.0
+      },
+      "grasp": {
+        "point_px": [
+          762.6,
+          374.8
+        ],
+        "yaw_deg": 77.0,
+        "jaw_opening_px": 13.3,
+        "jaw_opening_mm": 5.09,
+        "feasible": true
+      },
+      "score": 0.2437,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.0,
+        "exposure": 0.0,
+        "visibility": 0.624,
+        "width_fit": 0.661,
+        "size": 0.204,
+        "confidence": 0.534
+      }
+    },
+    {
+      "id": 53,
+      "priority": null,
+      "confidence": 0.625,
+      "colour": {
+        "name": "dark_grey",
+        "rgb": [
+          115,
+          116,
+          114
+        ]
+      },
+      "centroid_px": [
+        767.9,
+        555.0
+      ],
+      "area_px": 371.0,
+      "area_mm2": 54.5,
+      "obb": {
+        "center_px": [
+          762.0,
+          553.6
+        ],
+        "length_px": 37.0,
+        "width_px": 18.9,
+        "length_mm": 14.2,
+        "width_mm": 7.23,
+        "angle_deg": 175.6
+      },
+      "shape": {
+        "aspect_ratio": 1.96,
+        "rectangularity": 0.531,
+        "solidity": 0.721,
+        "studs_visible": 0,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 2.4,
+        "edge_support": 0.754,
+        "interior_texture": 0.0,
+        "isolation_px": 0.0,
+        "isolation_mm": 0.0,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.152
+      },
+      "grasp": {
+        "point_px": [
+          762.0,
+          553.6
+        ],
+        "yaw_deg": 85.6,
+        "jaw_opening_px": 18.9,
+        "jaw_opening_mm": 7.23,
+        "feasible": true
+      },
+      "score": 0.2283,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.0,
+        "exposure": 0.152,
+        "visibility": 0.222,
+        "width_fit": 0.766,
+        "size": 0.21,
+        "confidence": 0.625
+      }
+    },
+    {
+      "id": 32,
+      "priority": null,
+      "confidence": 0.686,
+      "colour": {
+        "name": "light_grey",
+        "rgb": [
+          158,
+          174,
+          173
+        ]
+      },
+      "centroid_px": [
+        852.0,
+        394.7
+      ],
+      "area_px": 604.0,
+      "area_mm2": 88.8,
+      "obb": {
+        "center_px": [
+          851.3,
+          394.8
+        ],
+        "length_px": 48.6,
+        "width_px": 24.6,
+        "length_mm": 18.64,
+        "width_mm": 9.41,
+        "angle_deg": 155.1
+      },
+      "shape": {
+        "aspect_ratio": 1.98,
+        "rectangularity": 0.506,
+        "solidity": 0.676,
+        "studs_visible": 1,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 5.4,
+        "edge_support": 0.624,
+        "interior_texture": 0.0,
+        "isolation_px": 0.0,
+        "isolation_mm": 0.0,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.0
+      },
+      "grasp": {
+        "point_px": [
+          851.3,
+          394.8
+        ],
+        "yaw_deg": 65.1,
+        "jaw_opening_px": 24.6,
+        "jaw_opening_mm": 9.41,
+        "feasible": true
+      },
+      "score": 0.2196,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.0,
+        "exposure": 0.0,
+        "visibility": 0.172,
+        "width_fit": 0.86,
+        "size": 0.341,
+        "confidence": 0.686
+      }
+    },
+    {
+      "id": 15,
+      "priority": null,
+      "confidence": 0.965,
+      "colour": {
+        "name": "dark_grey",
+        "rgb": [
+          51,
+          94,
+          120
+        ]
+      },
+      "centroid_px": [
+        915.0,
+        358.8
+      ],
+      "area_px": 23348.0,
+      "area_mm2": 3432.1,
+      "obb": {
+        "center_px": [
+          923.4,
+          344.3
+        ],
+        "length_px": 240.0,
+        "width_px": 184.7,
+        "length_mm": 92.01,
+        "width_mm": 70.81,
+        "angle_deg": 133.9
+      },
+      "shape": {
+        "aspect_ratio": 1.3,
+        "rectangularity": 0.527,
+        "solidity": 0.708,
+        "studs_visible": 1,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 23.8,
+        "edge_support": 0.707,
+        "interior_texture": 0.014,
+        "isolation_px": 0.0,
+        "isolation_mm": 0.0,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.554
+      },
+      "grasp": {
+        "point_px": [
+          923.4,
+          344.3
+        ],
+        "yaw_deg": 43.9,
+        "jaw_opening_px": 184.7,
+        "jaw_opening_mm": 70.81,
+        "feasible": false
+      },
+      "score": 0.0873,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.0,
+        "exposure": 0.554,
+        "visibility": 0.214,
+        "width_fit": 0.0,
+        "size": 1.0,
+        "confidence": 0.965
+      }
+    },
+    {
+      "id": 11,
+      "priority": null,
+      "confidence": 0.619,
+      "colour": {
+        "name": "sand_blue",
+        "rgb": [
+          124,
+          130,
+          124
+        ]
+      },
+      "centroid_px": [
+        655.7,
+        232.4
+      ],
+      "area_px": 246.0,
+      "area_mm2": 36.2,
+      "obb": {
+        "center_px": [
+          659.1,
+          234.1
+        ],
+        "length_px": 28.6,
+        "width_px": 14.0,
+        "length_mm": 10.97,
+        "width_mm": 5.36,
+        "angle_deg": 48.0
+      },
+      "shape": {
+        "aspect_ratio": 2.05,
+        "rectangularity": 0.615,
+        "solidity": 0.895,
+        "studs_visible": 1,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 4.1,
+        "edge_support": 0.573,
+        "interior_texture": 0.0,
+        "isolation_px": 0.7,
+        "isolation_mm": 0.27,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.606
+      },
+      "grasp": {
+        "point_px": [
+          659.1,
+          234.1
+        ],
+        "yaw_deg": 138.0,
+        "jaw_opening_px": 14.0,
+        "jaw_opening_mm": 5.36,
+        "feasible": false
+      },
+      "score": 0.0813,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.01,
+        "exposure": 0.606,
+        "visibility": 0.39,
+        "width_fit": 0.675,
+        "size": 0.139,
+        "confidence": 0.619
+      }
+    },
+    {
+      "id": 5,
+      "priority": null,
+      "confidence": 0.976,
+      "colour": {
+        "name": "dark_grey",
+        "rgb": [
+          110,
+          88,
+          75
+        ]
+      },
+      "centroid_px": [
+        833.8,
+        288.0
+      ],
+      "area_px": 10945.0,
+      "area_mm2": 1608.9,
+      "obb": {
+        "center_px": [
+          836.8,
+          279.2
+        ],
+        "length_px": 233.8,
+        "width_px": 123.3,
+        "length_mm": 89.65,
+        "width_mm": 47.29,
+        "angle_deg": 159.1
+      },
+      "shape": {
+        "aspect_ratio": 1.9,
+        "rectangularity": 0.38,
+        "solidity": 0.513,
+        "studs_visible": 6,
+        "unresolved_clump": true
+      },
+      "context": {
+        "table_deviation_sigma": 11.4,
+        "edge_support": 0.822,
+        "interior_texture": 0.025,
+        "isolation_px": 0.0,
+        "isolation_mm": 0.0,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.395
+      },
+      "grasp": {
+        "point_px": [
+          836.8,
+          279.2
+        ],
+        "yaw_deg": 69.1,
+        "jaw_opening_px": 123.3,
+        "jaw_opening_mm": 47.29,
+        "feasible": false
+      },
+      "score": 0.0719,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.0,
+        "exposure": 0.395,
+        "visibility": 0.0,
+        "width_fit": 0.0,
+        "size": 1.0,
+        "confidence": 0.976
+      }
+    },
+    {
+      "id": 43,
+      "priority": null,
+      "confidence": 0.556,
+      "colour": {
+        "name": "sand_blue",
+        "rgb": [
+          131,
+          140,
+          141
+        ]
+      },
+      "centroid_px": [
+        766.5,
+        488.5
+      ],
+      "area_px": 300.0,
+      "area_mm2": 44.1,
+      "obb": {
+        "center_px": [
+          767.0,
+          492.0
+        ],
+        "length_px": 24.0,
+        "width_px": 18.0,
+        "length_mm": 9.2,
+        "width_mm": 6.9,
+        "angle_deg": 90.0
+      },
+      "shape": {
+        "aspect_ratio": 1.33,
+        "rectangularity": 0.694,
+        "solidity": 0.968,
+        "studs_visible": 0,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 3.6,
+        "edge_support": 0.456,
+        "interior_texture": 0.0,
+        "isolation_px": 1.2,
+        "isolation_mm": 0.46,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.214
+      },
+      "grasp": {
+        "point_px": [
+          767.0,
+          492.0
+        ],
+        "yaw_deg": 0.0,
+        "jaw_opening_px": 18.0,
+        "jaw_opening_mm": 6.9,
+        "feasible": false
+      },
+      "score": 0.0702,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.018,
+        "exposure": 0.214,
+        "visibility": 0.549,
+        "width_fit": 0.75,
+        "size": 0.17,
+        "confidence": 0.556
+      }
+    },
+    {
+      "id": 33,
+      "priority": null,
+      "confidence": 0.661,
+      "colour": {
+        "name": "light_grey",
+        "rgb": [
+          161,
+          182,
+          181
+        ]
+      },
+      "centroid_px": [
+        841.2,
+        380.0
+      ],
+      "area_px": 236.0,
+      "area_mm2": 34.7,
+      "obb": {
+        "center_px": [
+          841.2,
+          379.9
+        ],
+        "length_px": 26.6,
+        "width_px": 10.9,
+        "length_mm": 10.19,
+        "width_mm": 4.19,
+        "angle_deg": 155.6
+      },
+      "shape": {
+        "aspect_ratio": 2.43,
+        "rectangularity": 0.813,
+        "solidity": 1.035,
+        "studs_visible": 1,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 5.6,
+        "edge_support": 0.532,
+        "interior_texture": 0.0,
+        "isolation_px": 0.0,
+        "isolation_mm": 0.0,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.0
+      },
+      "grasp": {
+        "point_px": [
+          841.2,
+          379.9
+        ],
+        "yaw_deg": 65.6,
+        "jaw_opening_px": 10.9,
+        "jaw_opening_mm": 4.19,
+        "feasible": false
+      },
+      "score": 0.0696,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.0,
+        "exposure": 0.0,
+        "visibility": 0.786,
+        "width_fit": 0.616,
+        "size": 0.133,
+        "confidence": 0.661
+      }
+    },
+    {
+      "id": 12,
+      "priority": null,
+      "confidence": 0.992,
+      "colour": {
+        "name": "dark_grey",
+        "rgb": [
+          59,
+          97,
+          117
+        ]
+      },
+      "centroid_px": [
+        753.3,
+        473.5
+      ],
+      "area_px": 21751.0,
+      "area_mm2": 3197.4,
+      "obb": {
+        "center_px": [
+          713.7,
+          437.7
+        ],
+        "length_px": 459.5,
+        "width_px": 134.7,
+        "length_mm": 176.16,
+        "width_mm": 51.63,
+        "angle_deg": 56.0
+      },
+      "shape": {
+        "aspect_ratio": 3.41,
+        "rectangularity": 0.352,
+        "solidity": 0.486,
+        "studs_visible": 8,
+        "unresolved_clump": true
+      },
+      "context": {
+        "table_deviation_sigma": 21.1,
+        "edge_support": 0.779,
+        "interior_texture": 0.086,
+        "isolation_px": 0.0,
+        "isolation_mm": 0.0,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.31
+      },
+      "grasp": {
+        "point_px": [
+          713.7,
+          437.7
+        ],
+        "yaw_deg": 146.0,
+        "jaw_opening_px": 134.7,
+        "jaw_opening_mm": 51.63,
+        "feasible": false
+      },
+      "score": 0.0687,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.0,
+        "exposure": 0.31,
+        "visibility": 0.0,
+        "width_fit": 0.0,
+        "size": 1.0,
+        "confidence": 0.992
+      }
+    },
+    {
+      "id": 44,
+      "priority": null,
+      "confidence": 0.712,
+      "colour": {
+        "name": "sand_blue",
+        "rgb": [
+          125,
+          127,
+          122
+        ]
+      },
+      "centroid_px": [
+        824.0,
+        492.3
+      ],
+      "area_px": 449.0,
+      "area_mm2": 66.0,
+      "obb": {
+        "center_px": [
+          822.2,
+          495.6
+        ],
+        "length_px": 36.5,
+        "width_px": 25.7,
+        "length_mm": 13.99,
+        "width_mm": 9.83,
+        "angle_deg": 145.8
+      },
+      "shape": {
+        "aspect_ratio": 1.42,
+        "rectangularity": 0.48,
+        "solidity": 0.616,
+        "studs_visible": 0,
+        "unresolved_clump": true
+      },
+      "context": {
+        "table_deviation_sigma": 4.6,
+        "edge_support": 0.773,
+        "interior_texture": 0.0,
+        "isolation_px": 0.0,
+        "isolation_mm": 0.0,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.0
+      },
+      "grasp": {
+        "point_px": [
+          822.2,
+          495.6
+        ],
+        "yaw_deg": 55.8,
+        "jaw_opening_px": 25.7,
+        "jaw_opening_mm": 9.83,
+        "feasible": false
+      },
+      "score": 0.0523,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.0,
+        "exposure": 0.0,
+        "visibility": 0.119,
+        "width_fit": 0.876,
+        "size": 0.254,
+        "confidence": 0.712
+      }
+    },
+    {
+      "id": 30,
+      "priority": null,
+      "confidence": 0.597,
+      "colour": {
+        "name": "dark_grey",
+        "rgb": [
+          96,
+          107,
+          106
+        ]
+      },
+      "centroid_px": [
+        856.3,
+        378.1
+      ],
+      "area_px": 234.0,
+      "area_mm2": 34.4,
+      "obb": {
+        "center_px": [
+          856.0,
+          376.2
+        ],
+        "length_px": 22.1,
+        "width_px": 18.0,
+        "length_mm": 8.49,
+        "width_mm": 6.89,
+        "angle_deg": 70.3
+      },
+      "shape": {
+        "aspect_ratio": 1.23,
+        "rectangularity": 0.589,
+        "solidity": 0.768,
+        "studs_visible": 0,
+        "unresolved_clump": false
+      },
+      "context": {
+        "table_deviation_sigma": 4.7,
+        "edge_support": 0.453,
+        "interior_texture": 0.0,
+        "isolation_px": 0.0,
+        "isolation_mm": 0.0,
+        "jaw_clearance_px": 0.0,
+        "jaw_clearance_mm": 0.0,
+        "exposed_perimeter_ratio": 0.0
+      },
+      "grasp": {
+        "point_px": [
+          856.0,
+          376.2
+        ],
+        "yaw_deg": 160.3,
+        "jaw_opening_px": 18.0,
+        "jaw_opening_mm": 6.89,
+        "feasible": false
+      },
+      "score": 0.052,
+      "score_terms": {
+        "clearance": 0.0,
+        "isolation": 0.0,
+        "exposure": 0.0,
+        "visibility": 0.337,
+        "width_fit": 0.749,
+        "size": 0.132,
+        "confidence": 0.597
+      }
+    }
+  ],
+  "params": {
+    "working_long_side": 1280,
+    "foreground_strong_sigma": 7.0,
+    "foreground_weak_sigma": 3.5,
+    "merge_colour_tol": 2.6,
+    "merge_edge_tol": 0.42,
+    "split_fill_target": 0.68,
+    "min_brick_area_px": 200,
+    "min_rectangularity": 0.42,
+    "min_brick_confidence": 0.45,
+    "priority_min_confidence": 0.7,
+    "score_weights": {
+      "clearance": 0.3,
+      "isolation": 0.16,
+      "exposure": 0.18,
+      "visibility": 0.16,
+      "width_fit": 0.08,
+      "size": 0.08,
+      "confidence": 0.14
+    },
+    "gripper_width_mm": [
+      4.0,
+      46.0
+    ]
+  }
+}

@@ -2,7 +2,6 @@ import argparse
 import sys
 import numpy as np
 from typing import Tuple
-from dotenv import load_dotenv
 from airo_camera_toolkit.utils.image_converter import ImageConverter
 from airo_camera_toolkit.cameras.realsense.realsense import Realsense
 from airo_dataset_tools.data_parsers.pose import Pose
