@@ -58,6 +58,15 @@ BRICK_HANDOFF_PATH = os.path.normpath(
 BRICK_HANDOFF_MAX_AGE = 1800.0
 FOOTPRINT_MATCH_TOLERANCE = 0.0025
 
+# --- the pile ------------------------------------------------------------------------------------------
+# Where submodule_3 leaves the brick it picked out of the pile for submodule_1 to go and stand over.
+# Short-lived on purpose: it describes one arrangement of a pile that every pick disturbs, so a target
+# older than a couple of minutes is describing a pile that no longer exists.
+PILE_TARGET_PATH = os.path.normpath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "run", "pile_target.json")
+)
+PILE_TARGET_MAX_AGE = 180.0
+
 PREGRASP_HEIGHT = 0.03
 
 # --- top-down tool orientation ---------------------------------------------------------------------------

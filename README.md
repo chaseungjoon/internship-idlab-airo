@@ -33,14 +33,25 @@ conda activate airo-mono
 
 - Run simulation
 
+M1 in Drake + Meshcat: a UR3e with a Robotiq 2F-85 and a wrist RealSense picking real lego parts out
+of a flat pile. Open the notebook and run the cells in order; it prints a Meshcat URL to watch in.
+
 ```bash
-python3 src/m1/simulation/submodule_0.py
+jupyter notebook src/m1/simulation/main.ipynb
 ```
+
+The perception is not simulated — the rendered colour and depth go into the same
+`m1/physical/submodule_3.py` that runs against the real camera.
 
 - Run physical
 
+Touch off the table once (the arm measures it, tilt included), then run the M1 submodules in order:
+
 ```bash
-jupyter notebook src/m1/physical/submodule_0.py
+python3 src/calibrate_table.py
+python3 src/m1/physical/submodule_3.py    # perceive the pile, choose a brick
+python3 src/m1/physical/submodule_1.py    # go above it, pre-grasp
+python3 src/m1/physical/submodule_2.py    # grasp and lift
 ```
 
 # Revo2 Hand setup
