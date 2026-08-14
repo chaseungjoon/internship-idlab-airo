@@ -43,7 +43,7 @@ DEFAULT_CALIBRATION_DIR = "/home/joon/int2026/calibration_dir"
 TABLE_Z = -0.0044
 
 TABLE_PLANE_PATH = os.path.normpath(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "run", "table_plane.json")
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "run", "table_plane.json")
 )
 TABLE_PLANE_MAX_AGE = 7 * 24 * 3600.0
 
@@ -53,7 +53,7 @@ FALLBACK_BRICK_WIDTH = 0.0078
 FALLBACK_BRICK_LENGTH = 0.0238
 
 BRICK_HANDOFF_PATH = os.path.normpath(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "run", "brick_handoff.json")
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "run", "brick_handoff.json")
 )
 BRICK_HANDOFF_MAX_AGE = 1800.0
 FOOTPRINT_MATCH_TOLERANCE = 0.0025
@@ -63,7 +63,7 @@ FOOTPRINT_MATCH_TOLERANCE = 0.0025
 # Short-lived on purpose: it describes one arrangement of a pile that every pick disturbs, so a target
 # older than a couple of minutes is describing a pile that no longer exists.
 PILE_TARGET_PATH = os.path.normpath(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "run", "pile_target.json")
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "run", "pile_target.json")
 )
 PILE_TARGET_MAX_AGE = 180.0
 
@@ -136,7 +136,7 @@ def load_table_plane(path: str = TABLE_PLANE_PATH, warn_if_old: bool = True) -> 
     if warn_if_old and time.time() - plane.measured_at > TABLE_PLANE_MAX_AGE:
         logger.warning(
             f"The table plane at {path} is {(time.time() - plane.measured_at) / 86400:.1f} days old. If the table "
-            "or the gripper has been touched since, re-run `python src/calibrate_table.py`."
+            "or the gripper has been touched since, re-run `python src/tools/calibrate_table.py`."
         )
     return plane
 
@@ -152,7 +152,7 @@ def table_z_at(x: float, y: float, plane: Optional[TablePlane] = None) -> float:
     if plane is None:
         logger.warning(
             f"No touched-off table plane at {TABLE_PLANE_PATH}; falling back to TABLE_Z={TABLE_Z:+.4f} m, which "
-            "is a guess. Run `python src/calibrate_table.py` to measure it."
+            "is a guess. Run `python src/tools/calibrate_table.py` to measure it."
         )
         return TABLE_Z
     return plane.z_at(x, y)

@@ -53,7 +53,7 @@ from loguru import logger
 _SRC_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 if _SRC_DIR not in sys.path:
     sys.path.insert(0, _SRC_DIR)
-from config import (  # noqa: E402
+from common.config import (  # noqa: E402
     APPROX_ARM_REACH,
     CAMERA_RESOLUTIONS,
     DEFAULT_CALIBRATION_DIR,
@@ -366,7 +366,7 @@ def resolve_table_plane(table_z: Optional[float] = None) -> Tuple[float, float, 
     logger.warning(
         f"The table has never been touched off, so every brick height is measured from "
         f"config.TABLE_Z={TABLE_Z:+.4f} m, which is a guess. A 2 cm error there turns every brick into a "
-        "clump and every clump into nothing. Run `python src/calibrate_table.py` first."
+        "clump and every clump into nothing. Run `python src/tools/calibrate_table.py` first."
     )
     return 0.0, 0.0, TABLE_Z
 

@@ -16,8 +16,8 @@ more board poses.
 Note that the height it reports is the height of *whatever surface the board is lying on*. That is
 only the tabletop if the board is lying on the tabletop::
 
-    python src/measure_table_z.py
-    python src/measure_table_z.py --calibration-dir /path/to/other_calibration_dir
+    python src/tools/measure_table_z.py
+    python src/tools/measure_table_z.py --calibration-dir /path/to/other_calibration_dir
 """
 
 from __future__ import annotations
@@ -40,10 +40,10 @@ from airo_spatial_algebra import SE3Container
 from airo_typing import HomogeneousMatrixType
 from loguru import logger
 
-_SRC_DIR = os.path.dirname(os.path.abspath(__file__))
+_SRC_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _SRC_DIR not in sys.path:
     sys.path.insert(0, _SRC_DIR)
-from config import DEFAULT_CALIBRATION_DIR, load_camera_pose_in_tcp, load_table_plane  # noqa: E402
+from common.config import DEFAULT_CALIBRATION_DIR, load_camera_pose_in_tcp, load_table_plane  # noqa: E402
 
 # Above this spread between samples, the samples are not describing one flat plane and the number
 # should not be trusted -- which points at the hand-eye calibration, not at the table.
@@ -158,7 +158,7 @@ def main(calibration_dir: str) -> None:
         "    taped to a panel, a wall or a riser, this number is that surface's height, not the table's.\n"
         "  - It reaches the base frame through the hand-eye calibration, so it carries that calibration's\n"
         "    error. That is why it is not used: it read -0.0240 m where the arm touched -0.0044 m.\n"
-        "\nFor the height the pick actually descends to, run:\n\n    python src/calibrate_table.py\n\n"
+        "\nFor the height the pick actually descends to, run:\n\n    python src/tools/calibrate_table.py\n\n"
         "which touches the tabletop with the arm and needs no camera at all. What agreement (or not) between\n"
         "the two tells you is how far off the hand-eye calibration is vertically.\n"
     )

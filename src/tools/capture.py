@@ -10,12 +10,12 @@ import cv2
 import numpy as np
 from loguru import logger
 
-# capture.py lives at src/capture.py, next to config.py, which carries this cell's constants and the
-# connection/error-handling plumbing that goes with them.
-_SRC_DIR = os.path.dirname(os.path.abspath(__file__))
+# src/ on the path, for common.config -- this cell's constants and the connection/error-handling
+# plumbing that goes with them.
+_SRC_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _SRC_DIR not in sys.path:
     sys.path.insert(0, _SRC_DIR)
-from config import (  # noqa: E402
+from common.config import (  # noqa: E402
     CAMERA_RESOLUTIONS,
     DEFAULT_CAMERA_RESOLUTION,
     DEFAULT_IP_ADDRESSES,
@@ -26,7 +26,7 @@ from config import (  # noqa: E402
     open_camera,
 )
 
-DEFAULT_OUTPUT_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lego_pic"))
+DEFAULT_OUTPUT_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "lego_pic"))
 FILENAME_PREFIX = "lego_pile"
 
 IMAGE_FORMATS: Dict[str, Tuple[str, list]] = {

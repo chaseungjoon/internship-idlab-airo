@@ -22,12 +22,17 @@ from pydrake.geometry import (
 from pydrake.math import RigidTransform, RollPitchYaw
 from pydrake.systems.sensors import CameraInfo, RgbdSensor
 
-from scene import ARM_URDF, add_meshcat_visualizer
-from airo_drake import finish_build
-from pydrake.planning import RobotDiagramBuilder
+import sys
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-FRAMES_DIR = Path(__file__).resolve().parent / "data" / "pretrain_frames"
+_SRC_DIR = str(Path(__file__).resolve().parent.parent)
+if _SRC_DIR not in sys.path:
+    sys.path.insert(0, _SRC_DIR)
+from common.scene import ARM_URDF, add_meshcat_visualizer  # noqa: E402
+from airo_drake import finish_build  # noqa: E402
+from pydrake.planning import RobotDiagramBuilder  # noqa: E402
+
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+FRAMES_DIR = Path(__file__).resolve().parent.parent / "data" / "pretrain_frames"
 
 # Wrist joint (wrist_3_joint, the 6th/last UR3e joint) sweep, in radians.
 WRIST_ANGLES = np.linspace(-np.pi / 2, np.pi / 2, 5)

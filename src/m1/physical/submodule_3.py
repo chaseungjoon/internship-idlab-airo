@@ -16,7 +16,7 @@ The ``main()`` at the bottom is still here and still works, as a way to look at 
 makes of a pile -- or of a saved ``--from-capture`` frame -- without tying up the robot or committing
 to a grasp. It writes ``config.PILE_TARGET_PATH``, which nothing in the pipeline reads any more.
 
-The robot-side twin of ``src/pile_perception.py``. That script is RGB-only and robot-free -- it takes
+The robot-side twin of ``src/prototypes/pile_perception.py``. That script is RGB-only and robot-free -- it takes
 a still photograph of the pile and ranks the grasps in pixels, with millimetres inferred from the 8 mm
 grid lego is moulded on. This module does the same job with the wrist RealSense and the hand-eye
 calibration in hand, which changes three things and only three:
@@ -34,7 +34,7 @@ calibration in hand, which changes three things and only three:
 
 Everything else -- the table appearance model, the hysteresis foreground, the watershed / merge /
 split instance segmentation, the clearance and scoring -- is the same pipeline, re-implemented here
-so that ``m1`` depends on nothing outside ``config.py``.
+so that ``m1`` depends on nothing outside ``common/config.py``.
 
 Pipeline:
   1. capture_pile_view    -- move to the viewpoint, grab colour + depth + the camera pose
@@ -77,7 +77,7 @@ from scipy import ndimage as ndi
 _SRC_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 if _SRC_DIR not in sys.path:
     sys.path.insert(0, _SRC_DIR)
-from config import (  # noqa: E402
+from common.config import (  # noqa: E402
     APPROX_ARM_REACH,
     CAMERA_RESOLUTIONS,
     DEFAULT_CALIBRATION_DIR,
@@ -1988,7 +1988,7 @@ def report(analysis: PileAnalysis) -> None:
         logger.error(
             "No brick in this view is a grasp the arm can be sent at. Either the pile is out of frame, the "
             "table has not been touched off (so every height is measured from a guess), or everything left is "
-            "too tightly packed for a fingertip. Try `python src/calibrate_table.py`, then move the pile "
+            "too tightly packed for a fingertip. Try `python src/tools/calibrate_table.py`, then move the pile "
             "closer to the base and look again."
         )
         return
@@ -2034,7 +2034,7 @@ def resolve_table_plane(table_z: Optional[float]) -> Tuple[float, float, float]:
     logger.warning(
         f"The table has never been touched off, so every brick height below is measured from "
         f"config.TABLE_Z={TABLE_Z:+.4f} m, which is a guess. A 2 cm error there turns every brick into a "
-        "clump and every clump into nothing. Run `python src/calibrate_table.py` first."
+        "clump and every clump into nothing. Run `python src/tools/calibrate_table.py` first."
     )
     return 0.0, 0.0, TABLE_Z
 
@@ -2091,7 +2091,7 @@ def resolve_table_plane(table_z: Optional[float]) -> Tuple[float, float, float]:
     type=float,
     default=None,
     help="Height of the table's surface in the base frame (metres), overriding the measured table "
-    "plane. You should not normally need this: `python src/calibrate_table.py` measures it, tilt "
+    "plane. You should not normally need this: `python src/tools/calibrate_table.py` measures it, tilt "
     "included, and passing a flat value here throws the tilt away.",
 )
 @click.option(

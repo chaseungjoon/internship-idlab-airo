@@ -19,7 +19,7 @@ from loguru import logger
 _SRC_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 if _SRC_DIR not in sys.path:
     sys.path.insert(0, _SRC_DIR)
-from lego_catalog import FootprintMatch, LegoPart, match_footprint  # noqa: E402
+from common.lego_catalog import FootprintMatch, LegoPart, match_footprint  # noqa: E402
 from m1.pile_perception import resize_to_working_resolution, segment_bricks, split_instances  # noqa: E402
 
 MIN_MEASURABLE_FOOTPRINT = 0.002

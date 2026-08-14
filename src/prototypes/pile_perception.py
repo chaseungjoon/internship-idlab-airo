@@ -27,9 +27,9 @@ should replace the confidence cues with a height-above-table test and keep every
 
 Reads int2026/lego_pic/ and writes back into it unless told otherwise:
 
-    python src/pile_perception.py
-    python src/pile_perception.py --debug
-    python src/pile_perception.py lego_pic/lego_pile_20260810_140851.jpg --out-dir /tmp/out
+    python src/prototypes/pile_perception.py
+    python src/prototypes/pile_perception.py --debug
+    python src/prototypes/pile_perception.py lego_pic/lego_pile_20260810_140851.jpg --out-dir /tmp/out
 """
 
 from __future__ import annotations
@@ -48,7 +48,7 @@ from scipy import ndimage as ndi
 
 # Where the pile frames live. Absolute, off this file's own location, so the script runs the same
 # from the repo root, from src/, or from anywhere else.
-LEGO_PIC_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "lego_pic")
+LEGO_PIC_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "lego_pic")
 
 # Every ``*_px`` threshold below is in pixels of a frame whose long side is this many pixels. The
 # frame is resized to it before processing and all reported pixel geometry is scaled back to the

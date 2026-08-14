@@ -46,7 +46,7 @@ from pydrake.math import RigidTransform
 _SRC_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 if _SRC_DIR not in sys.path:
     sys.path.insert(0, _SRC_DIR)
-from config import PREGRASP_HEIGHT  # noqa: E402
+from common.config import PREGRASP_HEIGHT  # noqa: E402
 from m1.physical.submodule_3 import Brick, PileAnalysis, analyse_pile, assign_priorities  # noqa: E402
 from m1.simulation import world as W  # noqa: E402
 

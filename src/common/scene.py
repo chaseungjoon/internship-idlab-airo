@@ -30,7 +30,7 @@ from pydrake.systems.primitives import ConstantVectorSource, MatrixGain
 from pydrake.systems.sensors import CameraInfo, RgbdSensor
 from pydrake.visualization import ApplyVisualizationConfig, VisualizationConfig
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 DEFAULT_BRICK_URDF = REPO_ROOT / "lego_3d" / "urdf" / "3005__light_bluish_gray.urdf"
 ARM_URDF = REPO_ROOT / "src" / "assets" / "ur3e" / "ur3e.urdf"
 GRIPPER_URDF = REPO_ROOT / "src" / "assets" / "revo2" / "urdf" / "revo2_right_hand.urdf"

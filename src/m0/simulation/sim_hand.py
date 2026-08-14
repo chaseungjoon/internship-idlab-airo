@@ -27,7 +27,7 @@ M0_DIR = Path(__file__).resolve().parent.parent
 if str(M0_DIR) not in sys.path:
     sys.path.insert(0, str(M0_DIR))
 if str(M0_DIR.parent) not in sys.path:
-    sys.path.insert(0, str(M0_DIR.parent))  # src/, for scene.py
+    sys.path.insert(0, str(M0_DIR.parent))  # src/, for common.scene
 
 from hand_model import (  # noqa: E402
     FINGERS,
@@ -40,7 +40,7 @@ from hand_model import (  # noqa: E402
     pose_to_joint_angles,
     save_pose,
 )
-from scene import GRIPPER_URDF  # noqa: E402
+from common.scene import GRIPPER_URDF  # noqa: E402
 
 #: Where the hand is welded in the world. Fingers point along +z, the palm faces +x.
 DEFAULT_MOUNT = RigidTransform(RotationMatrix.Identity(), [0.0, 0.0, 0.0])

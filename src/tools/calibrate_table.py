@@ -3,10 +3,10 @@
 Usage::
 
     # park the arm over the middle of the brick area first, tool pointing down, then:
-    python src/calibrate_table.py                     # probe a 5-point pattern around it
-    python src/calibrate_table.py --points 9 --half-width 0.08
-    python src/calibrate_table.py --freedrive         # hand-guide each touch instead of probing
-    python src/calibrate_table.py --from-current-pose # record where the tip is standing right now
+    python src/tools/calibrate_table.py                     # probe a 5-point pattern around it
+    python src/tools/calibrate_table.py --points 9 --half-width 0.08
+    python src/tools/calibrate_table.py --freedrive         # hand-guide each touch instead of probing
+    python src/tools/calibrate_table.py --from-current-pose # record where the tip is standing right now
 
 """
 
@@ -23,10 +23,10 @@ import numpy as np
 from airo_robots.manipulators.position_manipulator import PositionManipulator
 from loguru import logger
 
-_SRC_DIR = os.path.dirname(os.path.abspath(__file__))
+_SRC_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _SRC_DIR not in sys.path:
     sys.path.insert(0, _SRC_DIR)
-from config import (  # noqa: E402
+from common.config import (  # noqa: E402
     DEFAULT_IP_ADDRESSES,
     DEFAULT_REALMAN_PORT,
     SUPPORTED_ROBOT_TYPES,

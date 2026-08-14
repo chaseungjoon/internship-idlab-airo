@@ -241,7 +241,7 @@ def descend(cell: C.Cell, grasp_pose: HomogeneousMatrixType, contact_guard: bool
                     f"The tool touched something at z={stopped_z:+.4f} m while descending to z={target_z:+.4f} m, "
                     f"{(stopped_z - target_z) * 1000:.1f} mm early. Nothing should be in the way over an open "
                     "gripper, so either the table is higher here than the touch-off says (re-run "
-                    "`python src/calibrate_table.py`) or this brick is resting on another one."
+                    "`python src/tools/calibrate_table.py`) or this brick is resting on another one."
                 )
             time.sleep(0.02)
         action.wait()
@@ -397,7 +397,7 @@ def main() -> None:
     """
     import click
 
-    from config import BRICK_HANDOFF_MAX_AGE, BRICK_HANDOFF_PATH, DEFAULT_CALIBRATION_DIR, DEFAULT_CAMERA_RESOLUTION, SUPPORTED_ROBOT_TYPES
+    from common.config import BRICK_HANDOFF_MAX_AGE, BRICK_HANDOFF_PATH, DEFAULT_CALIBRATION_DIR, DEFAULT_CAMERA_RESOLUTION, SUPPORTED_ROBOT_TYPES
 
     @click.command()
     @click.option("--robot-type", type=click.Choice(SUPPORTED_ROBOT_TYPES), default="ur3e", show_default=True)

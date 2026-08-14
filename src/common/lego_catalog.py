@@ -9,7 +9,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 from loguru import logger
 
-_REPO_ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+_REPO_ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 DEFAULT_MESH_DIR = os.path.join(_REPO_ROOT, "lego_3d", "meshes", "visual")
 DEFAULT_URDF_DIR = os.path.join(_REPO_ROOT, "lego_3d", "urdf")
 DEFAULT_CACHE_PATH = os.path.join(_REPO_ROOT, "lego_3d", "catalog.json")
