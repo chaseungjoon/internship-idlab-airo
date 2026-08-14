@@ -1,4 +1,20 @@
-"""m1 submodule 3 (physical): look at the pile, decide which brick to grasp, hand it to submodule_1.
+"""m1 submodule 3: the pile perception -- segment the pile, measure every brick, score the grasps.
+
+**A library, not a step.** Deciding *which* brick to grasp used to live here and be handed to
+submodule_1 through ``config.PILE_TARGET_PATH``; it now lives in :mod:`m1.physical.submodule_1`
+alongside going there, exactly as it already did in the simulation, because the two halves of that
+decision were never usefully separable -- the choice depends on two viewpoints and the position
+depends on the choice. What is left here is the part both stacks share and neither duplicates:
+
+    :func:`analyse_pile` -- one frame in, a ranked list of measured bricks out.
+
+:mod:`m1.simulation.submodule_1` calls that function on rendered frames and
+:mod:`m1.physical.submodule_1` calls it on RealSense frames, and it cannot tell the difference. That
+is the point: the perception is not simulated, it is the same code.
+
+The ``main()`` at the bottom is still here and still works, as a way to look at what the perception
+makes of a pile -- or of a saved ``--from-capture`` frame -- without tying up the robot or committing
+to a grasp. It writes ``config.PILE_TARGET_PATH``, which nothing in the pipeline reads any more.
 
 The robot-side twin of ``src/pile_perception.py``. That script is RGB-only and robot-free -- it takes
 a still photograph of the pile and ranks the grasps in pixels, with millimetres inferred from the 8 mm
@@ -29,11 +45,10 @@ Pipeline:
   6. build_bricks         -- metric geometry, height and colour per region, with a confidence
   7. measure_clearance    -- room around each brick, on a top-down millimetre map of the table
   8. rank_bricks          -- order by how safely a top-down Robotiq 2F-85 grasp would work
-  9. write_pile_target    -- the winner, for submodule_1 to stand over and submodule_2 to grasp
+  9. write_pile_target    -- (``main()`` only) the winner, for inspection
 
-Output goes to ``config.PILE_TARGET_PATH``. Nothing here moves the arm except to reach the viewpoint:
-choosing the brick and going to it are separate steps on purpose, so the choice can be inspected
-before anything descends into the pile.
+Steps 1-8 are :func:`analyse_pile`, which is what submodule_1 calls. Nothing here moves the arm except
+to reach the viewpoint.
 
     python src/m1/physical/submodule_3.py
     python src/m1/physical/submodule_3.py --stay --debug-dir /tmp/pile
