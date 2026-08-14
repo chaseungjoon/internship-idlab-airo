@@ -62,11 +62,11 @@ Lego bricks sorted by shape or shape and color
 
 - Interface
   - Input: Camera frame(s), grasp pose
-  - Output: brick_id, (orientation)
+  - Output: brick id, brick orientation
 
 - Implementation
   - Submodule 0: Identify brick orientation
-  - Submodule 1: Identify brick_id from database
+  - Submodule 1: Identify brick id from database
 
 #### Module 3
 
