@@ -15,6 +15,7 @@ dependencies:
   - treelib
   - pip
   - pip:
+    - drake==1.32.0
     - airo-typing
     - airo-spatial-algebra
     - airo-camera-toolkit

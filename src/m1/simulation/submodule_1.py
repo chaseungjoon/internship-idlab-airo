@@ -21,6 +21,14 @@ that runs against the RealSense on the bench. What this module adds is the part 
 
 Nothing about the choice consults the simulator's ground truth. :func:`score_against_truth` compares
 the two afterwards, which is the whole reason for having a simulator.
+
+**One survey, many picks.** The two viewpoints cost four seconds of arm travel and two full pile
+analyses, and paying that for every single brick is most of the cycle time. So :func:`survey`
+triangulates *every* brick the two views agree on, not just the winner, and hands back a
+:class:`PileMap` ranked best-first; :class:`PileSession` then serves picks out of it without moving the
+camera again. The pile is looked at again only when the map runs low -- which is also the moment the
+bricks that were occluded at the start have become visible, and get their triangulation then. See
+:class:`PileSession` for what makes a cached position go stale and how that is handled.
 """
 
 from __future__ import annotations
@@ -224,6 +232,13 @@ class GraspTarget:
     approach_width: float = 0.05
     per_view: Dict[str, np.ndarray] = field(default_factory=dict)
 
+    # which look at the pile produced it, and how far apart the two views placed it. A target carries
+    # its survey with it because a cached position is only as good as the pile it was measured on: the
+    # session compares this against the current survey to know whether a failure is the brick's fault
+    # or the map's age.
+    survey_round: int = 0
+    match_distance: float = 0.0
+
     @property
     def closing_heading(self) -> float:
         """Base-frame direction the fingers must close along: square to the brick's long axis."""
@@ -258,6 +273,8 @@ class GraspTarget:
             "triangulation_gap_mm": round(self.triangulation_gap * 1000, 2),
             "method_disagreement_mm": round(self.method_disagreement * 1000, 2),
             "approach_width": round(self.approach_width, 4),
+            "survey_round": self.survey_round,
+            "match_distance_mm": round(self.match_distance * 1000, 2),
         }
 
 
@@ -400,6 +417,63 @@ def locate(first: ViewResult, second: ViewResult, a: Brick, b: Brick, plane: Tup
 AVOID_RADIUS_M = 0.004
 
 
+def _matched_pairs(
+    first: ViewResult,
+    second: ViewResult,
+    avoid: Sequence[np.ndarray] = (),
+) -> List[Tuple[Brick, Brick, float]]:
+    """The bricks both views found, minus any at a position already tried and failed."""
+    pairs = match_across_views(first, second)
+    if avoid:
+        before = len(pairs)
+        pairs = [
+            pair
+            for pair in pairs
+            if all(np.linalg.norm(np.array(pair[0].center_m) - np.asarray(p, float)[:2]) > AVOID_RADIUS_M for p in avoid)
+        ]
+        if len(pairs) < before:
+            logger.info(f"Skipping {before - len(pairs)} brick(s) that were already tried and not picked up.")
+    return pairs
+
+
+def build_target(
+    first: ViewResult,
+    second: ViewResult,
+    a: Brick,
+    b: Brick,
+    match_distance: float,
+    plane: Tuple[float, float, float],
+    survey_round: int = 0,
+) -> GraspTarget:
+    """Triangulate one matched pair into everything submodule_2 needs to grasp it."""
+    located = locate(first, second, a, b, plane)
+    height = located["height"]
+    position = np.array([located["position"][0], located["position"][1], plane[2] + plane[0] * located["position"][0] + plane[1] * located["position"][1] + height])
+
+    # Averaged across the views: two independent measurements of the same rectangle, and the jaws want
+    # the more conservative width anyway, which is why the wider of the two is taken for the opening.
+    long_axis = _combine_headings(a, b)
+    return GraspTarget(
+        position=position,
+        width=max(a.width_mm, b.width_mm) / 1000.0,
+        length=0.5 * (a.length_mm + b.length_mm) / 1000.0,
+        height=height,
+        long_axis_heading=long_axis,
+        table_z=float(plane[2] + plane[0] * position[0] + plane[1] * position[1]),
+        colour=a.colour_name,
+        score=0.5 * (a.score + b.score),
+        confidence=0.5 * (a.confidence + b.confidence),
+        triangulated=located["triangulated"],
+        plane_projected=located["plane_projected"],
+        triangulation_gap=located["gap"],
+        method_disagreement=located["disagreement"],
+        position_source=located["source"],
+        per_view={first.name: np.array(a.center_m), second.name: np.array(b.center_m)},
+        survey_round=survey_round,
+        match_distance=match_distance,
+    )
+
+
 def choose_target(
     first: ViewResult,
     second: ViewResult,
@@ -416,17 +490,11 @@ def choose_target(
     ``avoid`` lists positions already tried and failed. Without it the pile is unchanged after a failed
     grasp, so the same brick scores best again and the cycle picks it forever; a brick that has just
     refused to be picked up is exactly the brick to leave alone.
+
+    This is the one-brick-at-a-time path, kept because it is the smallest thing that demonstrates the
+    module. The loop uses :func:`survey`, which triangulates all of them in the same two looks.
     """
-    pairs = match_across_views(first, second)
-    if avoid:
-        before = len(pairs)
-        pairs = [
-            pair
-            for pair in pairs
-            if all(np.linalg.norm(np.array(pair[0].center_m) - np.asarray(p, float)[:2]) > AVOID_RADIUS_M for p in avoid)
-        ]
-        if len(pairs) < before:
-            logger.info(f"Skipping {before - len(pairs)} brick(s) that were already tried and not picked up.")
+    pairs = _matched_pairs(first, second, avoid)
     if not pairs:
         logger.error(
             "The two views agree on no graspable brick at all. Either the pile is out of frame from one "
@@ -436,30 +504,7 @@ def choose_target(
     logger.info(f"The two views agree on {len(pairs)} graspable brick(s).")
 
     a, b, match_distance = max(pairs, key=lambda pair: 0.5 * (pair[0].score + pair[1].score))
-    located = locate(first, second, a, b, plane)
-    height = located["height"]
-    position = np.array([located["position"][0], located["position"][1], plane[2] + plane[0] * located["position"][0] + plane[1] * located["position"][1] + height])
-
-    # Averaged across the views: two independent measurements of the same rectangle, and the jaws want
-    # the more conservative width anyway, which is why the wider of the two is taken for the opening.
-    long_axis = _combine_headings(a, b)
-    target = GraspTarget(
-        position=position,
-        width=max(a.width_mm, b.width_mm) / 1000.0,
-        length=0.5 * (a.length_mm + b.length_mm) / 1000.0,
-        height=height,
-        long_axis_heading=long_axis,
-        table_z=float(plane[2] + plane[0] * position[0] + plane[1] * position[1]),
-        colour=a.colour_name,
-        score=0.5 * (a.score + b.score),
-        confidence=0.5 * (a.confidence + b.confidence),
-        triangulated=located["triangulated"],
-        plane_projected=located["plane_projected"],
-        triangulation_gap=located["gap"],
-        method_disagreement=located["disagreement"],
-        position_source=located["source"],
-        per_view={first.name: np.array(a.center_m), second.name: np.array(b.center_m)},
-    )
+    target = build_target(first, second, a, b, match_distance, plane)
     logger.info(
         f"Chosen: {target.describe()} (mean score {target.score:.3f}, the two views placed it "
         f"{match_distance * 1000:.1f} mm apart)."
@@ -495,6 +540,145 @@ def _combine_headings(a: Brick, b: Brick) -> float:
     if min(a.aspect_ratio, b.aspect_ratio) >= SQUARE_ASPECT_RATIO:
         return _average_heading([a.long_axis_heading, b.long_axis_heading])
     return (a if a.aspect_ratio >= b.aspect_ratio else b).long_axis_heading
+
+
+# =================================================================================================
+# surveying the whole pile at once
+# =================================================================================================
+
+
+@dataclass
+class PileMap:
+    """Every brick one pair of looks agreed on, triangulated, ranked best-first.
+
+    The unit of work is the *survey*, not the brick: the two viewpoints are the expensive part of a
+    pick and they see the whole pile, so everything they agree on is located in the same breath and
+    kept here. Targets are served out of :attr:`targets` in score order and are removed as they go, so
+    :attr:`remaining` is the count that decides when the pile is worth looking at again.
+    """
+
+    targets: List[GraspTarget]
+    views: List[ViewResult]
+    survey_round: int
+    surveyed_at: float  # world.elapsed when the two looks were taken
+    #: How many bricks have been *attempted* out of this map. Zero means the map still describes the
+    #: pile exactly as the camera saw it; anything above zero means the pile has been reached into.
+    picks_since_survey: int = 0
+
+    @property
+    def remaining(self) -> int:
+        return len(self.targets)
+
+    def take_best(self) -> Optional[GraspTarget]:
+        """Remove and return the highest-scoring target left, or None if the map is empty."""
+        return self.targets.pop(0) if self.targets else None
+
+    def discard_near(self, position_xy: Sequence[float], radius: float) -> List[GraspTarget]:
+        """Forget the targets within ``radius`` of a point, returning them. Used after each pick.
+
+        A grasp is not a surgical operation: the jaws come down open around the brick and go back up
+        with it, and anything close enough to be inside that sweep may have been nudged. Its cached
+        position was measured before the nudge, so it is no longer worth what it was -- dropping it
+        here costs one brick's place in the queue and buys it a fresh triangulation at the next survey.
+        """
+        centre = np.asarray(position_xy, float)[:2]
+        keep, dropped = [], []
+        for target in self.targets:
+            (dropped if np.linalg.norm(target.position[:2] - centre) <= radius else keep).append(target)
+        self.targets = keep
+        return dropped
+
+    def describe(self) -> str:
+        return (
+            f"survey {self.survey_round}: {self.remaining} brick(s) triangulated and queued, taken at "
+            f"t={self.surveyed_at:.1f} s, {self.picks_since_survey} pick(s) made since"
+        )
+
+
+def build_pile_map(
+    first: ViewResult,
+    second: ViewResult,
+    plane: Tuple[float, float, float],
+    avoid: Sequence[np.ndarray] = (),
+    keep_out: Sequence[Tuple[Sequence[float], float]] = (),
+    survey_round: int = 0,
+    surveyed_at: float = 0.0,
+) -> PileMap:
+    """Triangulate every brick the two views agree on, ranked by mean score.
+
+    The same matching and the same triangulation :func:`choose_target` does, applied to all the pairs
+    instead of only the winner. A pair whose lines of sight cannot be turned into a point at all -- one
+    running parallel to the table, say -- is dropped with a warning rather than taking the survey down
+    with it: on a full pile there is always a marginal region at the edge of the frame, and the other
+    bricks are still perfectly good.
+
+    ``keep_out`` is a list of ``(centre_xy, radius)`` circles that are not part of the pile -- the
+    corner the picked bricks are stacked in, above all. Once the heap of already-picked bricks grows
+    bigger than what is left of the pile, the perception's own "largest blob is the pile" heuristic
+    starts pointing the wrong way, and without this the robot would cheerfully re-pick its own output.
+    """
+    pairs = _matched_pairs(first, second, avoid)
+    if keep_out:
+        before = len(pairs)
+        pairs = [
+            pair
+            for pair in pairs
+            if all(
+                np.linalg.norm(np.array(pair[0].center_m) - np.asarray(centre, float)[:2]) > radius
+                for centre, radius in keep_out
+            )
+        ]
+        if len(pairs) < before:
+            logger.info(f"Ignoring {before - len(pairs)} brick(s) sitting in a keep-out area, not in the pile.")
+
+    targets: List[GraspTarget] = []
+    for a, b, match_distance in pairs:
+        try:
+            targets.append(build_target(first, second, a, b, match_distance, plane, survey_round))
+        except RuntimeError as exception:
+            logger.warning(f"Could not locate the brick at {np.round(a.center_m, 3)} m: {exception} Skipping it.")
+    targets.sort(key=lambda t: t.score, reverse=True)
+
+    pile_map = PileMap(
+        targets=targets, views=[first, second], survey_round=survey_round, surveyed_at=surveyed_at
+    )
+    if not targets:
+        logger.error(
+            "The two views agree on no graspable brick at all. Either the pile is empty, it is out of "
+            "frame from one of them, or nothing left in it is a safe grasp."
+        )
+        return pile_map
+
+    logger.success(
+        f"Survey {survey_round}: {len(targets)} brick(s) triangulated in one pair of looks -- the next "
+        f"{len(targets)} pick(s) need no camera move at all."
+    )
+    for rank, target in enumerate(targets, start=1):
+        logger.info(
+            f"  {rank:2d}. {target.describe()} | score {target.score:.3f}, conf {target.confidence:.2f}, "
+            f"views {target.match_distance * 1000:.1f} mm apart, rays missing by "
+            f"{target.triangulation_gap * 1000:.2f} mm, {target.position_source.replace('_', ' ')}"
+        )
+    return pile_map
+
+
+def survey(
+    world: W.SimWorld,
+    avoid: Sequence[np.ndarray] = (),
+    keep_out: Sequence[Tuple[Sequence[float], float]] = (),
+    survey_round: int = 0,
+) -> PileMap:
+    """Two looks at the pile, and a triangulated position for every brick they agree on."""
+    views = [observe(world, name, eye) for name, eye in VIEWPOINTS]
+    return build_pile_map(
+        views[0],
+        views[1],
+        world.table_plane,
+        avoid=avoid,
+        keep_out=keep_out,
+        survey_round=survey_round,
+        surveyed_at=world.elapsed,
+    )
 
 
 # =================================================================================================
@@ -594,6 +778,247 @@ def run(
             "for a fingertip, or was seen by only one of the two views."
         )
     return go_to_pregrasp(world, target, pregrasp_height), views
+
+
+# =================================================================================================
+# emptying the pile: one survey, many picks
+# =================================================================================================
+
+#: Look at the pile again once fewer than this many triangulated bricks are left queued. At 2 the last
+#: brick of a survey is never picked from a map that has nothing behind it, so the arm is never left
+#: standing over an empty queue -- and the fresh look happens while there is still a known-good target
+#: in hand to fall back on. Raise it to re-survey more often (safer positions, slower); drop it to 1 to
+#: squeeze every last brick out of each survey.
+RESURVEY_WHEN_REMAINING_BELOW = 2
+#: On top of the jaws' own half-width: how far past the open fingers a brick can be and still be
+#: counted as possibly disturbed by the pick. The pads are 37.5 mm tall and the lifted brick swings a
+#: little as the arm accelerates away, so a centimetre past the fingertips is the honest margin.
+FINGER_DISTURBANCE_MARGIN_M = 0.012
+#: This many failed grasps in a row and the map is not believed any more, whatever it still has queued.
+#: One failure is a brick; three in a row is a map that no longer describes the table in front of it.
+MAX_CONSECUTIVE_FAILURES = 3
+
+
+class PileSession:
+    """Empties the pile, looking at it as few times as possible.
+
+    The loop this replaces re-ran both viewpoints before every single pick, which is honest -- each
+    pick disturbs the pile -- but pays for a whole survey to use one brick out of it. This one pays
+    the same price and uses the whole survey:
+
+    * The first survey triangulates every brick both views can see and queues them by score.
+    * Each :meth:`next_target` serves the best one left, straight to the pregrasp, no camera move.
+    * Bricks close enough to the one just picked to have been knocked by the jaws are dropped from
+      the queue rather than trusted (:meth:`PileMap.discard_near`).
+    * When the queue falls below :data:`RESURVEY_WHEN_REMAINING_BELOW`, the pile is looked at again.
+      That is also when the bricks that were buried at the start are finally on top and visible, so
+      the occluded ones get their triangulation exactly when it is worth doing.
+
+    **What a cached position risks, and what happens then.** A stale position means the fingers close
+    where the brick used to be. submodule_2 catches that on the width check, opens, and retreats -- so
+    the failure mode is a wasted pick, not a collision. The session then treats the failure according
+    to how much it can blame the map: a brick that failed on a *fresh* target (nothing had been touched
+    since the survey) is a genuinely bad grasp and is avoided for good, while one that failed on a
+    target the pile had since been reached into gets its position remeasured at the next survey and
+    another chance. Three failures in a row force a survey outright.
+
+    Usage::
+
+        session = PileSession(world)
+        while (target := session.next_target()) is not None:
+            result = submodule_2.run(world, target)
+            if result.success:
+                submodule_2.place(world, target)
+            session.record(target, result.success)
+    """
+
+    def __init__(
+        self,
+        world: W.SimWorld,
+        pregrasp_height: float = PREGRASP_HEIGHT,
+        resurvey_below: int = RESURVEY_WHEN_REMAINING_BELOW,
+        max_consecutive_failures: int = MAX_CONSECUTIVE_FAILURES,
+        keep_out: Optional[Sequence[Tuple[Sequence[float], float]]] = None,
+    ) -> None:
+        self.world = world
+        self.pregrasp_height = pregrasp_height
+        self.resurvey_below = max(1, int(resurvey_below))
+        self.max_consecutive_failures = max_consecutive_failures
+        self.keep_out = list(default_keep_out() if keep_out is None else keep_out)
+
+        self.map: Optional[PileMap] = None
+        self.surveys = 0
+        self.attempts = 0
+        self.picked: List[np.ndarray] = []
+        #: Bricks that failed a grasp the map cannot be blamed for. Never retried.
+        self.avoid: List[np.ndarray] = []
+        #: Bricks that failed while the map was already out of date. Cleared by the next survey, which
+        #: measures them again -- the position they were grasped at was not the position they were in.
+        self.provisional_avoid: List[np.ndarray] = []
+        self._consecutive_failures = 0
+        self._force_survey = False
+        self._last_target_was_fresh = True
+
+    # --- picking ----------------------------------------------------------------------------------
+    def next_target(self) -> Optional[GraspTarget]:
+        """The next brick to grasp, with the arm already standing over it. None when the pile is done.
+
+        Surveys only when the map is empty, low, or discredited. Targets whose pregrasp turns out to be
+        unreachable are skipped over rather than raising: with a whole map in hand there is always a
+        next-best candidate, which is exactly what the single-shot :func:`run` has to give up and ask
+        the caller for.
+        """
+        while True:
+            surveyed_now = False
+            if self._needs_survey():
+                self._survey()
+                surveyed_now = True
+
+            target = self._take_reachable()
+            if target is not None:
+                return target
+
+            # The map is empty. If it was taken with the pile untouched since, that is the real answer:
+            # nothing left is graspable. Otherwise the pile has moved under it, and it deserves a look.
+            if surveyed_now or self.map is None or self.map.picks_since_survey == 0:
+                logger.info(
+                    f"Nothing left to grasp: {len(self.picked)} brick(s) picked over {self.surveys} survey(s) "
+                    f"and {self.attempts} attempt(s)."
+                )
+                return None
+            logger.info("The map is used up but the pile has been disturbed since it was made; looking again.")
+            self._force_survey = True
+
+    def record(self, target: GraspTarget, success: bool) -> None:
+        """Tell the session how the grasp went. Call it after every attempt, successful or not."""
+        centre = np.asarray(target.position, float)[:2]
+        # Whatever happened to the brick, the jaws were down among its neighbours. Anything they could
+        # have reached is remeasured rather than trusted.
+        radius = 0.5 * target.approach_width + FINGER_DISTURBANCE_MARGIN_M
+        disturbed = self.map.discard_near(centre, radius) if self.map is not None else []
+        if disturbed:
+            logger.info(
+                f"Dropping {len(disturbed)} queued brick(s) within {radius * 1000:.0f} mm of the jaws; they will "
+                "be triangulated again at the next survey."
+            )
+
+        if success:
+            self.picked.append(centre)
+            self._consecutive_failures = 0
+            return
+
+        self._consecutive_failures += 1
+        if self._last_target_was_fresh:
+            # Nothing had been touched since this brick was measured, so the position was as good as the
+            # perception gets and the grasp still failed. That is the brick, not the map.
+            self.avoid.append(centre)
+            logger.info("The grasp failed on a freshly surveyed position; leaving that brick alone from now on.")
+        else:
+            self.provisional_avoid.append(centre)
+            logger.info(
+                "The grasp failed on a position measured before the pile was last reached into; it will be "
+                "remeasured at the next survey rather than written off."
+            )
+        if self._consecutive_failures >= self.max_consecutive_failures:
+            logger.warning(
+                f"{self._consecutive_failures} failed grasps in a row -- the map no longer describes the table. "
+                "Forcing a fresh survey."
+            )
+            self._force_survey = True
+
+    # --- the map ----------------------------------------------------------------------------------
+    def look(self) -> PileMap:
+        """Survey the pile now and return the map, instead of waiting for :meth:`next_target` to.
+
+        Only for looking at what the survey produced -- the picking that follows uses the same map, so
+        calling this before the loop costs nothing.
+        """
+        self._survey()
+        assert self.map is not None
+        return self.map
+
+    def _needs_survey(self) -> bool:
+        return self.map is None or self._force_survey or self.map.remaining < self.resurvey_below
+
+    def _survey(self) -> None:
+        self.surveys += 1
+        if self.map is not None:
+            logger.info(
+                f"Re-surveying: {self.map.remaining} triangulated brick(s) left, below the {self.resurvey_below} "
+                "threshold. Bricks that were occluded at the start get located now."
+            )
+        # The provisional list only ever meant "measured on a pile that has since moved", and this is
+        # the survey that moves it back.
+        self.provisional_avoid.clear()
+        self._consecutive_failures = 0
+        self._force_survey = False
+        self.map = survey(
+            self.world,
+            avoid=self.avoid,
+            keep_out=self.keep_out,
+            survey_round=self.surveys,
+        )
+
+    def _take_reachable(self) -> Optional[GraspTarget]:
+        """Pop targets until one of them can actually be stood over."""
+        assert self.map is not None
+        while self.map.remaining:
+            target = self.map.take_best()
+            if self._is_avoided(target):
+                logger.info(f"Skipping the queued brick at {np.round(target.position[:2], 3)} m; it failed earlier.")
+                continue
+            # Recorded before the counter moves: a target served off a map nothing has been picked from
+            # is measuring the pile that is actually there.
+            self._last_target_was_fresh = self.map.picks_since_survey == 0
+            try:
+                go_to_pregrasp(self.world, target, self.pregrasp_height)
+            except RuntimeError as exception:
+                logger.warning(f"Cannot stand over the brick at {np.round(target.position[:2], 3)} m: {exception}")
+                continue
+            self.map.picks_since_survey += 1
+            self.attempts += 1
+            logger.info(
+                f"Pick {self.attempts} from survey {target.survey_round} "
+                f"({self.map.remaining} triangulated brick(s) still queued, no camera move needed)."
+            )
+            return target
+        return None
+
+    def _is_avoided(self, target: GraspTarget) -> bool:
+        centre = np.asarray(target.position, float)[:2]
+        return any(
+            np.linalg.norm(centre - np.asarray(p, float)[:2]) <= AVOID_RADIUS_M
+            for p in (*self.avoid, *self.provisional_avoid)
+        )
+
+    # --- for the record ---------------------------------------------------------------------------
+    def summary(self) -> Dict:
+        """What the survey-once approach actually saved, in the only units that matter: looks taken."""
+        return {
+            "surveys": self.surveys,
+            "camera_moves": self.surveys * len(VIEWPOINTS),
+            "attempts": self.attempts,
+            "picked": len(self.picked),
+            "camera_moves_one_survey_per_pick": self.attempts * len(VIEWPOINTS),
+            "queued": 0 if self.map is None else self.map.remaining,
+            "given_up_on": len(self.avoid),
+        }
+
+
+def default_keep_out() -> List[Tuple[Sequence[float], float]]:
+    """The corner the picked bricks are stacked in, which is not part of the pile.
+
+    Imported late on purpose: submodule_2 imports :class:`GraspTarget` from here, so naming it at
+    module level would close the circle. Where the bricks are put down belongs to the module that puts
+    them down, and this is the one place that has to know about it.
+    """
+    from m1.simulation.submodule_2 import DROP_POSITION  # noqa: PLC0415
+
+    # Generous, because the bricks are released from six centimetres up and bounce: the heap spreads.
+    # There is room to be generous -- the drop point is a quarter of a metre from the pile's centre and
+    # the pile is 85 mm across, so a 110 mm circle round the drop still leaves 65 mm of clear table
+    # between the two, well beyond anything that could put a real pile brick inside it.
+    return [(np.asarray(DROP_POSITION, float)[:2], 0.11)]
 
 
 # =================================================================================================

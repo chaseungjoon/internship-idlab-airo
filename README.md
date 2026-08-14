@@ -1,19 +1,21 @@
-# Info
+# IDLab-AIRO Summer Internship
 
-* Bachelor's Internship @ IDLab-AIRO, UGent
-* Timeline: 1JUL26-26AUG26
-* Robot type: Realman, UR3e
-* Hand type: BrainCo Revo2, 
+## Info
 
-# Objective
+* **Bachelor's Internship** @ ***IDLab-AIRO, UGent***
+* **Timeline**: 1JUL26-26AUG26
+* **Robot type**: RM75, UR3e
+* **TCP type**: BrainCo Revo2, Robotiq 2F-85
+
+## Objective
 
 * Learn robot manipulation and imitation learning utilizing robot hand and lego bricks
 
-[PLAN.md](PLAN.md)
+* [PLAN.md](PLAN.md)
 
-# Quickstart
+## Quickstart
 
-- Prerequisites: python3.10.* & conda
+> Prerequisites: python3.10.*, conda
 
 - Install
 
@@ -40,21 +42,24 @@ of a flat pile. Open the notebook and run the cells in order; it prints a Meshca
 jupyter notebook src/m1/simulation/main.ipynb
 ```
 
-The perception is not simulated — the rendered colour and depth go into the same
-`m1/physical/submodule_3.py` that runs against the real camera.
-
 - Run physical
+
+Calibrate the robot
+
+```bash
+airo-camera-toolkit hand-eye-calibration --mode eye_in_hand --robot_ip=[ROBOT_IP]
+```
 
 Touch off the table once (the arm measures it, tilt included), then run the M1 submodules in order:
 
 ```bash
 python3 src/calibrate_table.py
-python3 src/m1/physical/submodule_3.py    # perceive the pile, choose a brick
-python3 src/m1/physical/submodule_1.py    # go above it, pre-grasp
-python3 src/m1/physical/submodule_2.py    # grasp and lift
+python3 src/m1/physical/submodule_3.py
+python3 src/m1/physical/submodule_1.py
+python3 src/m1/physical/submodule_2.py
 ```
 
-# Revo2 Hand setup
+## Revo2 Hand setup
 
 ```bash
 pip install bc-stark-sdk 
