@@ -8,6 +8,7 @@ import contextlib
 import glob
 import json
 import os
+import socket
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Dict, Iterator, Optional, Tuple
@@ -210,9 +211,47 @@ def _disconnect_arm(arm: PositionManipulator) -> None:
         logger.warning(f"Ignoring error while disconnecting the arm: {exception}")
 
 
+#: RTDE's port on a UR controller. Probed before the driver is built, never spoken to directly.
+UR_RTDE_PORT = 30004
+#: How long that probe waits. A controller on the same subnet answers a TCP connect in milliseconds, so
+#: this is long enough to be sure and short enough that a mistyped address is a two-second mistake.
+CONNECT_PROBE_TIMEOUT = 3.0
+
+
+def _unreachable(ip_address: str, port: int, timeout: float = CONNECT_PROBE_TIMEOUT) -> Optional[str]:
+    """Why ``ip_address:port`` cannot be opened, or ``None`` if it can.
+
+    This exists because ur_rtde's ``RTDEControlInterface`` constructor **retries forever** rather than
+    raising: point it at an address with nothing behind it and the whole program stops on the "Connecting
+    to ..." line with no error, no traceback and no timeout. The careful message below is unreachable
+    without a check like this one, and an infinite hang is the least debuggable failure there is.
+    """
+    try:
+        with socket.create_connection((ip_address, port), timeout=timeout):
+            return None
+    except OSError as exception:
+        return str(exception) or type(exception).__name__
+
+
 @contextlib.contextmanager
 def connect_arm(robot_type: str, ip_address: str, port: int) -> Iterator[PositionManipulator]:
     logger.info(f"Connecting to {robot_type} arm at {ip_address}...")
+    probe_port = port if robot_type == "realman" else UR_RTDE_PORT
+    failure = _unreachable(ip_address, probe_port)
+    if failure is not None:
+        raise RuntimeError(
+            f"Nothing answered at {ip_address}:{probe_port} within {CONNECT_PROBE_TIMEOUT:.0f} s ({failure}), so "
+            f"the {robot_type} arm is not reachable from this machine. In order of how often it is each one:\n"
+            f"  * this host has no address on the robot's subnet. `ip -brief addr` should show one; if the\n"
+            f"    interface the robot is cabled to has no IPv4, that is the fault. A NetworkManager profile\n"
+            f"    bound to an interface name that no longer exists (NIC names shift when hardware moves) is\n"
+            f"    the usual reason -- `nmcli con show <profile> | grep interface-name` against\n"
+            f"    `ip -brief addr` will show it.\n"
+            f"  * the controller is powered off, or still booting.\n"
+            f"  * the cable is out, or in the wrong port.\n"
+            f"  * the address is wrong: this one came from --ip-address or config.DEFAULT_IP_ADDRESSES.\n"
+            f"Check with `ping {ip_address}` before running this again."
+        )
     try:
         arm = create_arm(robot_type, ip_address, port)
     except Exception as exception:

@@ -143,6 +143,38 @@ MAX_PREGRASP_ERROR_M = 0.008
 #: margin submodule_2 descends with, so the gripper is already at its approach opening on arrival.
 GRIPPER_APPROACH_MARGIN_M = 0.014
 
+# =================================================================================================
+# looking again, from straight above
+# =================================================================================================
+
+#: Camera heights above the brick's top face for the re-look, first that solves wins.
+#:
+#: **Why look again at all.** Every position here is an outline projected onto the plane of its own top
+#: face, so an error in that plane's height slides the answer sideways by ``height error x tan(angle off
+#: vertical)``. From a survey viewpoint across the table a brick is seen 20 to 30 degrees off vertical,
+#: where that tangent is 0.4 to 0.6 -- half of any height error lands in x and y. Looking from *directly
+#: above* makes the tangent zero, so the same height error moves the answer by nothing at all. It is the
+#: only one of the three error terms that geometry can remove for free, and it is the term that bites
+#: hardest on the parts whose height was guessed rather than measured.
+#:
+#: With the camera about 18 cm behind the fingertips along the tool axis, 30 cm of camera height puts the
+#: TCP roughly 12 cm over the brick -- the same height the retract leg uses, so a brick that can be
+#: grasped can usually be looked at this way too. The lower entries are for the ones near the edge of the
+#: workspace, where standing high is what runs out of reach first.
+NADIR_CAMERA_HEIGHTS_M = (0.30, 0.26, 0.22)
+#: A part found this far from where the survey put it is taken to be the same part. It has to be *wider*
+#: than the error being corrected -- that is the entire point of the re-look -- and a lego stud is only
+#: 8 mm, so it is necessarily wider than the gap to the neighbour as well. No single number is safely
+#: both, which is why the size check below carries the other half of the burden.
+NADIR_MATCH_TOLERANCE_M = 0.025
+#: ...and it has to be about the same size. A neighbour that falls inside the tolerance above is usually
+#: a different part with a different footprint, and this is what catches it.
+NADIR_WIDTH_TOLERANCE_M = 0.006
+#: Above this, the re-look and the survey disagree about where the brick is by more than a grasp can
+#: absorb. The re-look's answer is used -- it is the one with no lever arm -- but this is the number that
+#: says the survey geometry is still wrong, and the one to watch after a re-calibration.
+NADIR_CORRECTION_WARNING_M = 0.015
+
 
 # =================================================================================================
 # turning pixels into places
@@ -324,6 +356,9 @@ class GraspTarget:
     #: anything, so a bad plane and a part with no depth on it compound instead. Parts standing on edge
     #: are the usual case: the top face they show the camera is a narrow strip.
     height_measured: bool = True
+    #: How far the straight-down re-look moved this brick from where the survey put it, in metres, or
+    #: ``nan`` if it was never re-looked at. This is the survey's own lateral error, measured.
+    nadir_correction: float = float("nan")
 
     # where the arm ended up
     pregrasp_pose: Optional[HomogeneousMatrixType] = None
@@ -371,6 +406,7 @@ class GraspTarget:
             "view_disagreement_mm": round(self.view_disagreement * 1000, 2),
             "matched_in_second_view": self.matched_in_second_view,
             "height_measured": self.height_measured,
+            "nadir_correction_mm": round(self.nadir_correction * 1000, 2),
             "approach_width": round(self.approach_width, 4),
             "survey_round": self.survey_round,
             "match_distance_mm": round(self.match_distance * 1000, 2),
@@ -882,6 +918,117 @@ def survey(
 
 
 # =================================================================================================
+# looking again, from straight above
+# =================================================================================================
+
+
+def look_straight_down(
+    cell: C.Cell,
+    position_xy: Sequence[float],
+    top_face_z: float,
+    heights: Sequence[float] = NADIR_CAMERA_HEIGHTS_M,
+) -> Optional[PileAnalysis]:
+    """Put the camera directly over a point, looking down, and run the perception on what it sees.
+
+    Returns ``None`` when no pose in :data:`NADIR_CAMERA_HEIGHTS_M` is reachable -- which is not a
+    failure of the pick, only of the improvement, so the caller keeps the survey's answer.
+    """
+    x, y = float(position_xy[0]), float(position_xy[1])
+    target = np.array([x, y, top_face_z])
+    for height in heights:
+        eye = np.array([x, y, top_face_z + height])
+        q = C.solve_tool_ik(cell, C.look_at_tool_pose(cell, eye, target))
+        if q is None:
+            continue
+        logger.info(f"Looking again from {height * 100:.0f} cm straight above the brick ...")
+        cell.move_arm_to(q)
+        cell.advance(VIEW_SETTLE_DURATION)
+        view = cell.capture("nadir")
+        analysis = analyse_pile(view, cell.table_plane, cell.robot_type)
+        assign_priorities(analysis.ordered, None, PREGRASP_HEIGHT)
+        return analysis
+    logger.warning(
+        f"No reachable pose above the brick at ({x:.3f}, {y:.3f}) m to look straight down from, at any of "
+        f"{[round(h * 100) for h in heights]} cm. Descending on the survey's position instead, which carries "
+        "whatever lateral error the view angle gave it."
+    )
+    return None
+
+
+def refine_over_brick(cell: C.Cell, target: GraspTarget) -> GraspTarget:
+    """Re-measure ``target`` from straight above it, and move it there. Modified in place.
+
+    The survey says *which* brick and roughly where; this says where, properly. Only the geometry is
+    taken from the new look -- position, size, height, long axis -- because the choice was view 1's and
+    is not being reopened: a brick that looks worse from overhead is still the brick the arm was sent for.
+
+    Everything about this is best-effort. An unreachable overhead pose, a look that finds nothing where
+    the brick should be, or a part whose size does not match keeps the survey's numbers and says so. The
+    pick then proceeds exactly as it did before this function existed.
+    """
+    original = np.array(target.position[:2], float)
+    analysis = look_straight_down(cell, original, target.top_face_z)
+    if analysis is None:
+        return target
+
+    candidates = [
+        (float(np.linalg.norm(np.array(brick.center_m) - original)), brick)
+        for brick in analysis.bricks
+    ]
+    within = [(distance, brick) for distance, brick in candidates if distance <= NADIR_MATCH_TOLERANCE_M]
+    if not within:
+        nearest = min(candidates, key=lambda item: item[0])[0] if candidates else float("inf")
+        logger.warning(
+            f"The re-look found nothing within {NADIR_MATCH_TOLERANCE_M * 1000:.0f} mm of where the survey put "
+            f"this brick (nearest region {nearest * 1000:.0f} mm away). Either it was knocked, or the survey is "
+            "further out than the search radius. Keeping the survey's position."
+        )
+        return target
+
+    distance, brick = min(within, key=lambda item: item[0])
+    if abs(brick.width_mm / 1000.0 - target.width) > NADIR_WIDTH_TOLERANCE_M:
+        logger.warning(
+            f"The region {distance * 1000:.0f} mm from the survey's position is {brick.width_mm:.1f} mm wide "
+            f"where the survey measured {target.width * 1000:.1f} mm. That is a different part, not this one "
+            "seen better. Keeping the survey's position."
+        )
+        return target
+
+    x, y = float(brick.center_m[0]), float(brick.center_m[1])
+    a, b, c = cell.table_plane
+    table_z = float(c + a * x + b * y)
+
+    target.nadir_correction = float(np.linalg.norm(np.array([x, y]) - original))
+    target.position = np.array([x, y, table_z + brick.height_m])
+    target.table_z = table_z
+    target.width = brick.width_mm / 1000.0
+    target.length = brick.length_mm / 1000.0
+    target.height = float(brick.height_m)
+    target.long_axis_heading = float(brick.long_axis_heading)
+    target.height_measured = bool(brick.height_measured)
+    target.position_source = "nadir_projection"
+    target.per_view["nadir"] = np.array([x, y])
+
+    logger.success(
+        f"Re-look from overhead: the brick is at ({x:.4f}, {y:.4f}) m, "
+        f"{target.nadir_correction * 1000:.1f} mm from where the survey put it. "
+        f"{target.describe()}"
+    )
+    if target.nadir_correction > NADIR_CORRECTION_WARNING_M:
+        logger.warning(
+            f"That is a {target.nadir_correction * 1000:.0f} mm correction -- wider than the jaws' slack, so the "
+            "survey's position would have missed. The grasp uses the corrected one, but a survey that wrong is "
+            "the hand-eye calibration talking: see src/tools/verify_pick_accuracy.py."
+        )
+    if not target.height_measured:
+        logger.info(
+            "The overhead look could not measure this part's height either, so its height is still the fallback "
+            "-- but from straight above that costs almost nothing sideways, which is the point of looking again."
+        )
+    return target
+
+
+# =================================================================================================
 # going there
 # =================================================================================================
 
@@ -1001,6 +1148,7 @@ def run(
     cell: C.Cell,
     pregrasp_height: float = PREGRASP_HEIGHT,
     avoid: Sequence[np.ndarray] = (),
+    refine: bool = True,
 ) -> Tuple[GraspTarget, List[ViewResult]]:
     """The whole of submodule_1: two looks, one decision, one pregrasp.
 
@@ -1013,6 +1161,12 @@ def run(
     :class:`PileSession` does, rather than raising on the first that cannot. It only gives up when the
     whole list is exhausted, which is the honest failure: not "this brick is unreachable" but "none of
     them are".
+
+    ``refine`` re-measures the chosen brick from straight above before descending
+    (:func:`refine_over_brick`), which is what removes the lateral error the survey's viewing angle
+    causes. It costs one camera move and one more pile analysis per pick. Pass ``False`` to descend on
+    the survey's position, which is only worth doing once the hand-eye calibration is good enough that
+    the correction it prints has gone quiet.
     """
     views = [observe(cell, name, eye) for name, eye in VIEWPOINTS]
     pile_map = build_pile_map(
@@ -1027,6 +1181,11 @@ def run(
     unreachable = 0
     while (target := pile_map.take_best()) is not None:
         try:
+            # Re-looked at before the descent is planned, because it moves the brick: every pose
+            # go_to_pregrasp solves is built from the position, so refining afterwards would send the
+            # arm to poses computed for somewhere else.
+            if refine:
+                refine_over_brick(cell, target)
             go_to_pregrasp(cell, target, pregrasp_height)
         except RuntimeError as exception:
             unreachable += 1
@@ -1110,16 +1269,25 @@ class PileSession:
         resurvey_below: int = RESURVEY_WHEN_REMAINING_BELOW,
         max_consecutive_failures: int = MAX_CONSECUTIVE_FAILURES,
         keep_out: Optional[Sequence[Tuple[Sequence[float], float]]] = None,
+        refine: bool = True,
     ) -> None:
         self.cell = cell
         self.pregrasp_height = pregrasp_height
         self.resurvey_below = max(1, int(resurvey_below))
         self.max_consecutive_failures = max_consecutive_failures
         self.keep_out = list(default_keep_out() if keep_out is None else keep_out)
+        #: Re-measure each brick from straight above before descending on it. One camera move and one
+        #: pile analysis per pick, in exchange for dropping the survey's viewing-angle error -- see
+        #: :func:`refine_over_brick`. It does not undo the survey: the two viewpoint moves and their two
+        #: analyses are still paid once per survey rather than once per pick, so the looking still goes
+        #: from two per pick to one per pick plus two per survey.
+        self.refine = refine
 
         self.map: Optional[PileMap] = None
         self.surveys = 0
         self.attempts = 0
+        #: How many overhead re-looks were taken, for :meth:`summary` to price.
+        self.refinements = 0
         self.picked: List[np.ndarray] = []
         #: Bricks that failed a grasp the map cannot be blamed for. Never retried.
         self.avoid: List[np.ndarray] = []
@@ -1235,6 +1403,10 @@ class PileSession:
             # is measuring the pile that is actually there.
             self._last_target_was_fresh = self.map.picks_since_survey == 0
             try:
+                # Before the descent is planned, not after: the poses are all built from the position.
+                if self.refine:
+                    refine_over_brick(self.cell, target)
+                    self.refinements += 1
                 go_to_pregrasp(self.cell, target, self.pregrasp_height)
             except RuntimeError as exception:
                 logger.warning(f"Cannot stand over the brick at {np.round(target.position[:2], 3)} m: {exception}")
@@ -1243,7 +1415,8 @@ class PileSession:
             self.attempts += 1
             logger.info(
                 f"Pick {self.attempts} from survey {target.survey_round} "
-                f"({self.map.remaining} located brick(s) still queued, no camera move needed)."
+                f"({self.map.remaining} located brick(s) still queued, "
+                f"{'one overhead look taken' if self.refine else 'no camera move needed'})."
             )
             return target
         return None
@@ -1260,7 +1433,9 @@ class PileSession:
         """What the survey-once approach actually saved, in the only units that matter: looks taken."""
         return {
             "surveys": self.surveys,
-            "camera_moves": self.surveys * len(VIEWPOINTS),
+            "camera_moves": self.surveys * len(VIEWPOINTS) + self.refinements,
+            "survey_moves": self.surveys * len(VIEWPOINTS),
+            "overhead_relooks": self.refinements,
             "attempts": self.attempts,
             "picked": len(self.picked),
             "camera_moves_one_survey_per_pick": self.attempts * len(VIEWPOINTS),
