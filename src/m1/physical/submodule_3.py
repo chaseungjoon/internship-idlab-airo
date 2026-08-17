@@ -1,58 +1,4 @@
 """m1 submodule 3: the pile perception -- segment the pile, measure every brick, score the grasps.
-
-**A library, not a step.** Deciding *which* brick to grasp used to live here and be handed to
-submodule_1 through ``config.PILE_TARGET_PATH``; it now lives in :mod:`m1.physical.submodule_1`
-alongside going there, exactly as it already did in the simulation, because the two halves of that
-decision were never usefully separable -- the choice depends on two viewpoints and the position
-depends on the choice. What is left here is the part both stacks share and neither duplicates:
-
-    :func:`analyse_pile` -- one frame in, a ranked list of measured bricks out.
-
-:mod:`m1.simulation.submodule_1` calls that function on rendered frames and
-:mod:`m1.physical.submodule_1` calls it on RealSense frames, and it cannot tell the difference. That
-is the point: the perception is not simulated, it is the same code.
-
-The ``main()`` at the bottom is still here and still works, as a way to look at what the perception
-makes of a pile -- or of a saved ``--from-capture`` frame -- without tying up the robot or committing
-to a grasp. It writes ``config.PILE_TARGET_PATH``, which nothing in the pipeline reads any more.
-
-The robot-side twin of ``src/prototypes/pile_perception.py``. That script is RGB-only and robot-free -- it takes
-a still photograph of the pile and ranks the grasps in pixels, with millimetres inferred from the 8 mm
-grid lego is moulded on. This module does the same job with the wrist RealSense and the hand-eye
-calibration in hand, which changes three things and only three:
-
-  * **Scale is measured, not inferred.** Every outline is back-projected onto the table plane the arm
-    touched off, so the footprints come out in metres in the robot's base frame. No stud-pitch ruler,
-    and no dependence on the pile containing enough visible studs to calibrate against.
-  * **Depth decides what is a brick.** The one question a single RGB frame cannot always answer is a
-    tan brick against a knot in the plywood -- same colour, same size, same crisp outline. One of them
-    is 10 mm off the table, so the height map settles it outright. The RGB confidence cues are kept as
-    the fallback for the pixels where the RealSense returns nothing, which on brick edges is many.
-  * **Burial replaces "exposure" as the top-of-pile test.** The still-photo version infers that a
-    clean isolated rectangle is a brick nothing lies on top of. Here the height of the ring around
-    each brick says so directly.
-
-Everything else -- the table appearance model, the hysteresis foreground, the watershed / merge /
-split instance segmentation, the clearance and scoring -- is the same pipeline, re-implemented here
-so that ``m1`` depends on nothing outside ``common/config.py``.
-
-Pipeline:
-  1. capture_pile_view    -- move to the viewpoint, grab colour + depth + the camera pose
-  2. build_scene          -- per-pixel base-frame position and height above the touched-off table
-  3. fit_table_model      -- what the bare table looks like at every pixel, seeded from the height map
-  4. segment_foreground   -- brick pixels vs. table pixels, inside the pile's workspace
-  5. segment_instances    -- cut that foreground into one region per brick
-  6. build_bricks         -- metric geometry, height and colour per region, with a confidence
-  7. measure_clearance    -- room around each brick, on a top-down millimetre map of the table
-  8. rank_bricks          -- order by how safely a top-down Robotiq 2F-85 grasp would work
-  9. write_pile_target    -- (``main()`` only) the winner, for inspection
-
-Steps 1-8 are :func:`analyse_pile`, which is what submodule_1 calls. Nothing here moves the arm except
-to reach the viewpoint.
-
-    python src/m1/physical/submodule_3.py
-    python src/m1/physical/submodule_3.py --stay --debug-dir /tmp/pile
-    python src/m1/physical/submodule_3.py --from-capture /tmp/pile/capture_1754.npz
 """
 
 from __future__ import annotations
@@ -99,9 +45,6 @@ from common.config import (  # noqa: E402
     open_camera,
 )
 
-# The joint configuration the pile is looked at from. Same viewpoint style as submodule_1's POS1: far
-# enough back that the whole pile is in frame and inside the RealSense's minimum range, tilted enough
-# that the pile is not hidden behind the gripper. --stay skips the move and uses wherever the arm is.
 PILE_VIEW: List[float] = [-0.08343679, -1.31992237, 0.26209098, -0.40548201, -1.20620281, -1.63604099]
 
 # --- working resolution ---------------------------------------------------------------------------

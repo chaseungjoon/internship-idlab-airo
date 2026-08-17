@@ -25,7 +25,21 @@ if TYPE_CHECKING:
 SUPPORTED_ROBOT_TYPES: Tuple[str, ...] = ("ur3e", "realman")
 DEFAULT_IP_ADDRESSES: Dict[str, str] = {"ur3e": "10.43.0.162", "realman": "192.168.1.18"}
 DEFAULT_REALMAN_PORT = 8080
-APPROX_ARM_REACH: Dict[str, float] = {"ur3e": 0.66, "realman": 0.85}
+#: How far the arm reaches horizontally, to the *flange*, as the datasheet gives it: a UR3e is 500 mm,
+#: a Realman RM65 is 850 mm.
+#:
+#: **Not the fingertips.** A 231 mm gripper looks like 231 mm of extra reach and is nothing of the kind
+#: for the grasps this project makes: pointing straight down, the tool spends its whole length going
+#: *down*, adding zero horizontally -- and worse, the wrist then has to sit 32 cm above the fingertips,
+#: which eats the arm's vertical budget and makes a top-down pose reach *less* far the higher it is.
+#: That is why freedriving to a brick proves nothing about whether it can be grasped: freedrive puts the
+#: tool at whatever angle it likes, where the same 231 mm does buy horizontal reach.
+#:
+#: This was 0.66 -- the UR3e's 500 mm with the gripper added on -- which let the pile perception offer
+#: bricks 59 cm out (0.9 x 0.66) that no straight-down pose can get near, and the failure then surfaced
+#: as an IK error in the middle of a pick instead of a rejected region at perception time. The 0.9 factor
+#: the two callers apply to this number is what turns the flange envelope into a usable top-down radius.
+APPROX_ARM_REACH: Dict[str, float] = {"ur3e": 0.50, "realman": 0.85}
 
 # --- camera ------------------------------------------------------------------------------------------
 CAMERA_RESOLUTIONS: Dict[str, Tuple[int, int]] = {
