@@ -7,11 +7,12 @@ from __future__ import annotations
 import contextlib
 import glob
 import json
+import math
 import os
 import socket
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Dict, Iterator, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, Iterator, Optional, Sequence, Tuple
 
 import numpy as np
 from airo_robots.manipulators.position_manipulator import PositionManipulator
@@ -339,6 +340,32 @@ def open_camera(resolution: Tuple[int, int]) -> Iterator["Realsense"]:
         camera.pipeline.stop()
 
 
+#: Which hand-eye solver's answer to use, in order of preference; the first one with a pose file and a
+#: finite residual wins. Pinned rather than picked by lowest residual: on a small sample the residuals
+#: separate the methods by less than their spread (Daniilidis 0.012632 vs Tsai 0.012775 here, a
+#: difference in the fourth decimal), so "lowest residual" is choosing on noise while the methods
+#: themselves disagree by centimetres. ``None`` restores the old lowest-residual behaviour.
+HAND_EYE_METHOD_PREFERENCE: Optional[Sequence[str]] = ("Tsai", "Horaud", "Daniilidis", "Andreff", "Park")
+
+
+def select_hand_eye_method(residual_errors: Dict[str, float], available: Sequence[str]) -> str:
+    """Pick the solver to trust: the first preferred one that actually solved, else lowest residual.
+
+    A method is only a candidate if it produced a pose file *and* a finite residual -- an ``Infinity``
+    means the solve failed outright, which is what a degenerate set of calibration poses does to Park.
+    """
+    usable = [m for m in available if math.isfinite(residual_errors.get(m, math.inf))]
+    if not usable:
+        raise RuntimeError(
+            f"No hand-eye method in {sorted(available)} produced a finite residual, so none of them solved. "
+            "The calibration poses are degenerate; re-run it with more, and more varied, orientations."
+        )
+    for method in HAND_EYE_METHOD_PREFERENCE or ():
+        if method in usable:
+            return method
+    return min(usable, key=lambda method: residual_errors[method])
+
+
 def load_camera_pose_in_tcp(calibration_dir: str) -> HomogeneousMatrixType:
     results_dirs = glob.glob(os.path.join(calibration_dir, "results_n=*"))
     if not results_dirs:
@@ -347,10 +374,21 @@ def load_camera_pose_in_tcp(calibration_dir: str) -> HomogeneousMatrixType:
 
     with open(os.path.join(results_dir, "residual_errors.json")) as f:
         residual_errors = json.load(f)
-    best_method = min(residual_errors, key=lambda method: residual_errors[method])
+    available = [
+        os.path.basename(path)[len("camera_pose_") : -len(".json")]
+        for path in glob.glob(os.path.join(results_dir, "camera_pose_*.json"))
+    ]
+    best_method = select_hand_eye_method(residual_errors, available)
 
     pose_path = os.path.join(results_dir, f"camera_pose_{best_method}.json")
     logger.info(f"Using {best_method} hand-eye calibration (residual {residual_errors[best_method]:.4f}): {pose_path}")
+    spread = [residual_errors[m] for m in available if math.isfinite(residual_errors.get(m, math.inf))]
+    if len(spread) > 1 and max(spread) - min(spread) < 1e-3:
+        logger.warning(
+            f"The {len(spread)} solvers' residuals span only {(max(spread) - min(spread)):.2e}, so they are "
+            "indistinguishable on this data and the choice between them is arbitrary. That is a sign of too "
+            "few calibration poses, not of agreement -- compare the pose files before trusting any of them."
+        )
     with open(pose_path) as f:
         calibration = json.load(f)
 
