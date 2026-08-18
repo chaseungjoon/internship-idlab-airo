@@ -64,39 +64,7 @@ SUSPICIOUS_OFFSET_MM = 2.0
 SUSPICIOUS_TILT_DEG = 0.5
 
 
-def fit_plane_to_depth(
-    scene: perception.Scene, iterations: int = 6, inlier_mm: float = 3.0
-) -> Optional[Tuple[Tuple[float, float, float], float, int]]:
-    """Fit ``z = a*x + b*y + c`` to the depth points the *camera* thinks are the tabletop.
-
-    Seeded from the lowest two fifths of the height readings and re-fitted a few times, keeping what
-    lands within ``inlier_mm`` of the current plane. The tabletop is the widest flat thing in the frame,
-    so this converges on it even with the pile sitting in the middle -- but only if it really is the
-    widest, which is what the returned inlier count is for.
-
-    Returns the plane, its RMS residual in metres, and how many pixels it was fitted to; ``None`` when
-    there is not enough depth over the reachable frame to fit anything.
-    """
-    usable = scene.reach_mask & scene.depth_valid
-    if usable.sum() < 500:
-        return None
-
-    x = scene.table_xy[..., 0][usable].astype(np.float64)
-    y = scene.table_xy[..., 1][usable].astype(np.float64)
-    a, b, c = scene.plane
-    z = a * x + b * y + c + scene.height[usable].astype(np.float64)
-
-    design = np.column_stack([x, y, np.ones_like(x)])
-    inliers = scene.height[usable] <= np.percentile(scene.height[usable], 40.0)
-    plane = np.asarray(scene.plane, float)
-    for _ in range(iterations):
-        if inliers.sum() < 100:
-            return None
-        plane, *_ = np.linalg.lstsq(design[inliers], z[inliers], rcond=None)
-        residual = z - design @ plane
-        inliers = np.abs(residual) < inlier_mm / 1000.0
-    rms = float(np.sqrt(np.mean((z[inliers] - design[inliers] @ plane) ** 2)))
-    return (float(plane[0]), float(plane[1]), float(plane[2])), rms, int(inliers.sum())
+fit_plane_to_depth = perception.fit_plane_to_depth
 
 
 def tilt_degrees(plane: Sequence[float]) -> float:

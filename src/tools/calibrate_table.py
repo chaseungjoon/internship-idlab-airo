@@ -5,6 +5,7 @@ Usage::
     # park the arm over the middle of the brick area first, tool pointing down, then:
     python src/tools/calibrate_table.py                     # probe a 5-point pattern around it
     python src/tools/calibrate_table.py --points 9 --half-width 0.08
+    python src/tools/calibrate_table.py --max-probe-travel 0.25   # parked well above the table
     python src/tools/calibrate_table.py --freedrive         # hand-guide each touch instead of probing
     python src/tools/calibrate_table.py --from-current-pose # record where the tip is standing right now
 
@@ -44,9 +45,16 @@ PROBE_SPEED = 0.005  # m/s
 PROBE_ACCELERATION = 0.25  # m/s^2
 # How far above the expected table each probe starts, and retreats to afterwards.
 PROBE_CLEARANCE = 0.03  # metres
-# If a probe descends further than this without finding anything, something is wrong (no table under
-# that point, contact detection not working) -- stop rather than keep going down.
-MAX_PROBE_TRAVEL = 0.06  # metres
+# Runaway guard only: how far a probe may descend before we conclude it is never going to find the
+# table. Generous on purpose -- it is measured from the start of the descent, which is anchored to
+# wherever the arm was parked, so a tight value here rejects good touches taken from a safe parking
+# height rather than catching bad ones. The descent runs at PROBE_SPEED under contact detection, so a
+# long travel costs seconds, not safety. What actually catches a bad touch is MAX_TOUCH_SPREAD.
+MAX_PROBE_TRAVEL = 0.15  # metres
+# Once one point is on the tabletop, the tabletop is known. A later touch further than this from the
+# ones already taken landed on a brick, a fixture or over the table's edge -- which is the check the
+# travel limit was standing in for, made against something that means anything.
+MAX_TOUCH_SPREAD = 0.02  # metres
 
 # Above this worst-case residual the touched points do not lie on one plane, so the fit is meaningless.
 SUSPICIOUS_RESIDUAL = 0.003  # metres
@@ -80,12 +88,20 @@ def probe_point(
     xy: np.ndarray,
     start_z: float,
     joint_speed: float,
+    max_travel: float = MAX_PROBE_TRAVEL,
+    max_spread: float = MAX_TOUCH_SPREAD,
+    reference_z: Optional[float] = None,
 ) -> Optional[float]:
     """Touch the table at ``xy`` and return the TCP z where contact happened.
 
     The arm is taken to ``start_z`` above the point first (a normal move), then descends under
     ``moveUntilContact``, which watches the UR's own force estimate and retracts to the contact point
-    when it fires. ``None`` means no contact was found within :data:`MAX_PROBE_TRAVEL`.
+    when it fires.
+
+    ``None`` means the touch was not usable: no contact inside ``max_travel``, or -- once
+    ``reference_z`` is known from an earlier touch -- a contact more than ``max_spread`` away from the
+    tabletop the other points found. The arm is always returned to its hover pose first, so a rejected
+    probe never leaves the tip resting on the table for the next move to drag it sideways.
     """
     rtde_control = getattr(arm, "rtde_control", None)
     rtde_receive = getattr(arm, "rtde_receive", None)
@@ -110,19 +126,39 @@ def probe_point(
         [0.0, 0.0, -PROBE_SPEED, 0.0, 0.0, 0.0], [0.0, 0.0, -1.0, 0.0, 0.0, 0.0], PROBE_ACCELERATION
     )
     touched_z = float(rtde_receive.getActualTCPPose()[2])
+    travel = start_z - touched_z
+
+    def retreat() -> None:
+        arm.move_to_tcp_pose(pose, joint_speed=joint_speed).wait()
 
     if not contacted:
-        logger.warning(f"No contact detected at {xy.round(3)}; the probe stopped at z={touched_z:+.4f} m.")
-        return None
-    if start_z - touched_z > MAX_PROBE_TRAVEL:
         logger.warning(
-            f"The probe at {xy.round(3)} descended {(start_z - touched_z) * 1000:.0f} mm before contact (limit "
-            f"{MAX_PROBE_TRAVEL * 1000:.0f} mm). That is not the table under this point; discarding it."
+            f"No contact detected at {xy.round(3)} within {travel * 1000:.0f} mm; the probe stopped at "
+            f"z={touched_z:+.4f} m. Either there is no table under this point, or the descent ran out of "
+            f"travel before reaching it -- raise --max-probe-travel if the arm started well above the table."
         )
+        retreat()
+        return None
+    if travel > max_travel:
+        logger.warning(
+            f"The probe at {xy.round(3)} descended {travel * 1000:.0f} mm before contact, past the "
+            f"{max_travel * 1000:.0f} mm runaway limit, so it is being discarded. If the arm was simply parked "
+            f"high above the table then this touch was fine: re-run with --max-probe-travel {travel * 1.5:.2f} "
+            "(or park the tip closer to the tabletop first)."
+        )
+        retreat()
+        return None
+    if reference_z is not None and abs(touched_z - reference_z) > max_spread:
+        logger.warning(
+            f"The probe at {xy.round(3)} touched z={touched_z:+.4f} m, {abs(touched_z - reference_z) * 1000:.0f} mm "
+            f"from the z={reference_z:+.4f} m the other points found (limit {max_spread * 1000:.0f} mm). That is a "
+            "brick, a fixture or the edge of the table rather than the tabletop; discarding it."
+        )
+        retreat()
         return None
 
-    logger.success(f"Touched the table at z={touched_z:+.4f} m.")
-    arm.move_to_tcp_pose(pose, joint_speed=joint_speed).wait()  # back up to where we came from
+    logger.success(f"Touched the table at z={touched_z:+.4f} m after {travel * 1000:.0f} mm of descent.")
+    retreat()
     return touched_z
 
 
@@ -258,6 +294,23 @@ def save_plane(path: str, plane: TablePlane) -> None:
     "area bricks are actually picked from -- a plane fitted over 2 cm says little about 20 cm away.",
 )
 @click.option(
+    "--max-probe-travel",
+    type=click.FloatRange(0.01, 0.40),
+    default=MAX_PROBE_TRAVEL,
+    show_default=True,
+    help="Runaway guard: how far a probe may descend before it is given up on, in metres. Measured "
+    "from the start of the descent, so it has to cover however far above the table the arm was "
+    "parked -- raise it rather than discard a touch that actually found the tabletop.",
+)
+@click.option(
+    "--max-touch-spread",
+    type=click.FloatRange(0.002, 0.20),
+    default=MAX_TOUCH_SPREAD,
+    show_default=True,
+    help="How far a touch may sit from the ones already taken before it is treated as a brick, a "
+    "fixture or the table's edge instead of the tabletop.",
+)
+@click.option(
     "--freedrive",
     is_flag=True,
     help="Hand-guide each touch instead of probing with contact detection. Slower, but it needs no "
@@ -283,6 +336,8 @@ def main(
     speed_ratio: int,
     points: int,
     half_width: float,
+    max_probe_travel: float,
+    max_touch_spread: float,
     freedrive: bool,
     from_current_pose: bool,
     output: str,
@@ -319,18 +374,31 @@ def main(
             pattern = probe_pattern(start_pose[:3, 3], points, half_width)
             logger.info(
                 f"Probing {len(pattern)} point(s) around x={start_pose[0, 3]:+.3f} y={start_pose[1, 3]:+.3f}, "
-                f"descending from z={start_z:+.4f} m at {PROBE_SPEED * 1000:.0f} mm/s."
+                f"descending from z={start_z:+.4f} m at {PROBE_SPEED * 1000:.0f} mm/s, giving up after "
+                f"{max_probe_travel * 1000:.0f} mm."
             )
             for xy in pattern:
-                touched_z = probe_point(arm, xy, start_z, joint_speed)
+                # The median of what has been touched so far is the tabletop as currently known; the
+                # first probe has nothing to compare against and is judged on travel alone.
+                reference_z = float(np.median([z for _, z in touched])) if touched else None
+                touched_z = probe_point(
+                    arm,
+                    xy,
+                    start_z,
+                    joint_speed,
+                    max_travel=max_probe_travel,
+                    max_spread=max_touch_spread,
+                    reference_z=reference_z,
+                )
                 if touched_z is not None:
                     touched.append((xy, touched_z))
 
     if not touched:
         raise click.ClickException(
-            "No touch points were recorded, so the table height is unknown. If probing found no contact, the "
-            "arm may not have been close enough above the table -- park it a couple of centimetres over the "
-            "tabletop and try again, or use --freedrive."
+            "No touch points were recorded, so the table height is unknown. If the probes did find contact "
+            f"but were discarded for descending too far, they were fine and the {max_probe_travel * 1000:.0f} mm "
+            "--max-probe-travel is simply shorter than the gap the arm was parked above the table: raise it. "
+            "If no contact was found at all, park the tip closer to the tabletop, or use --freedrive."
         )
 
     a, b, c, residual = fit_plane(touched)
