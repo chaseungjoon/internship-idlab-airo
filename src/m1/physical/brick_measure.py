@@ -55,11 +55,8 @@ class ViewFootprint:
 
 
 def _instance_containing(instances: Sequence[np.ndarray], click_xy: Tuple[float, float]) -> Optional[np.ndarray]:
-    """The segmented instance the clicked pixel lands on, or the nearest one within a few pixels.
-
-    A click a pixel or two off the brick's edge -- onto the seam the instance splitter cut away, or
-    onto a stud's shadow -- should still select the brick the user obviously meant, so a miss falls
-    back to the closest instance centroid rather than failing.
+    """The segmented instance the clicked pixel lands on, else the nearest centroid -- a click a pixel off
+    the edge should still select the brick the user meant.
     """
     x, y = int(round(click_xy[0])), int(round(click_xy[1]))
     for instance in instances:
@@ -89,11 +86,8 @@ def _project_pixels_onto_plane(
     X_base_camera: HomogeneousMatrixType,
     plane_z: float,
 ) -> Optional[np.ndarray]:
-    """Back-project ``(N, 2)`` pixels onto the horizontal plane at ``plane_z``, in the base frame.
-
-    The vectorised twin of ``submodule_1.pixel_to_base_ray`` + ``project_ray_onto_height``: rays
-    through the camera centre, rotated into the base frame, scaled until they cross the plane.
-    Returns ``(N, 2)`` x, y points, or ``None`` if the rays run away from the plane.
+    """Back-project ``(N, 2)`` pixels onto the horizontal plane at ``plane_z``, base frame. ``None`` if the
+    rays run away from the plane.
     """
     homogeneous = np.column_stack([pixels.astype(float), np.ones(len(pixels))])
     directions_camera = homogeneous @ np.linalg.inv(intrinsics_matrix).T
@@ -115,10 +109,8 @@ def _shrink_for_view_tilt(
     view_direction: np.ndarray,
     height: float,
 ) -> Tuple[float, float]:
-    """Remove the side walls a tilted view adds to a silhouette (see the module docstring).
-
-    The inflation is ``height * tan(tilt)`` along the camera's azimuth, and a rectangle axis only
-    picks up the component of that along itself.
+    """Remove the side walls a tilted view adds to the silhouette: ``height * tan(tilt)`` along the
+    camera's azimuth, projected onto each rectangle axis.
     """
     horizontal = view_direction[:2]
     horizontal_norm = float(np.linalg.norm(horizontal))
@@ -143,10 +135,8 @@ def save_debug_overlay(
 ) -> str:
     """Draw what was segmented and which instance the click selected, and save it.
 
-    The one thing that can go quietly wrong in this measurement is the segmentation picking the wrong
-    pixels -- two touching bricks merged into one instance measures as one big brick, and the match
-    then reports a part that is not on the table. There is no live display during a run, so this is
-    the only way to see it. Every instance is outlined faintly; the chosen one is drawn bright.
+    Two touching bricks merged into one instance measure as one big brick, and there is no live display
+    during a run -- this is the only way to see it. All instances faint, the chosen one bright.
     """
     os.makedirs(debug_dir, exist_ok=True)
     overlay = cv2.cvtColor(working_image, cv2.COLOR_RGB2BGR).copy()
@@ -173,20 +163,13 @@ def measure_footprint_in_view(
     debug_dir: Optional[str] = None,
     name: str = "view",
 ) -> Optional[ViewFootprint]:
-    """Measure the clicked brick's footprint in one frame.
+    """
+        Args:
+    Measure the clicked brick's footprint in one frame.
 
-    Args:
-        image_rgb: the frame the user clicked in.
-        click_uv: the confirmed pixel, in ``image_rgb``'s full resolution.
-        intrinsics_matrix: colour intrinsics for that resolution.
-        X_base_camera: camera pose in the base frame at the moment the frame was grabbed.
-        table_z: the tabletop's height in the base frame.
-        assumed_height: current best guess at the brick's height, used both to place the projection
-            plane and to size the tilt correction. The caller iterates this (see
-            :func:`measure_brick`), so it only has to be roughly right.
-
-    Returns ``None`` if the brick could not be segmented or projected, which is a reason to fall back
-    rather than to abort -- the pick still works with the default dimensions.
+    ``assumed_height`` places the projection plane and sizes the tilt correction; the caller iterates it
+    (see :func:`measure_brick`), so it only has to be roughly right. ``None`` if the brick could not be
+    segmented or projected -- a reason to fall back, not to abort.
     """
     working_image, working_scale = resize_to_working_resolution(image_rgb)
     foreground, _, _ = segment_bricks(working_image)
@@ -213,8 +196,8 @@ def measure_footprint_in_view(
 
     (center_x, center_y), (side_a, side_b), angle_deg = cv2.minAreaRect(projected.astype(np.float32))
     angle = np.radians(angle_deg)
-    # minAreaRect's angle names the first side; build both axes from it so the tilt correction can be
-    # applied to each side along its own direction.
+    # minAreaRect's angle names the first side; both axes come from it so each side is corrected
+    # along its own direction.
     axis_a = np.array([np.cos(angle), np.sin(angle)])
     axis_b = np.array([-np.sin(angle), np.cos(angle)])
 
@@ -266,12 +249,8 @@ def measure_height_above_table(
 ) -> Optional[float]:
     """How far the brick's top surface stands above ``table_z``, from the depth stream.
 
-    Only ever used to break a tie between catalog parts that share a footprint -- typically "3.2 mm
-    plate or 9.6 mm brick", a 6.4 mm question. That is a fair ask of a RealSense at 40 cm; measuring
-    a brick's height in absolute terms is not, which is why nothing else depends on this.
-
-    The median of the brick's own pixels is taken (not the mean) so the studs, which stand 1.6 mm
-    proud over a minority of the top face, cannot pull it up.
+    Only breaks ties between catalog parts sharing a footprint -- a 6.4 mm plate-or-brick question,
+    which is a fair ask of a RealSense at 40 cm. Median, so the studs cannot pull it up.
     """
     mask = footprint.mask
     if footprint.working_scale != 1.0:
@@ -320,12 +299,8 @@ class MeasuredBrick:
         return self.long_axis_heading + np.pi / 2
 
     def describe(self) -> str:
-        """A one-line summary. Deliberately does not claim to have identified the part.
-
-        Several part numbers routinely share a footprint *and* a height -- the 1x2 plates 3023, 3069,
-        1748, 15573 and 3794b are all 7.8 x 15.8 x 3.2 mm -- and telling them apart needs their
-        topside detail, which this does not look at. It does not need to: the grasp is decided by the
-        dimensions, and on those the answer is the same whichever of them it is.
+        """A one-line summary. Deliberately does not claim to have identified the part: several part numbers
+        share a footprint *and* a height, and telling them apart needs topside detail this never looks at.
         """
         if self.part is None:
             identity = "no catalog match"
@@ -350,11 +325,9 @@ def identify_part(
 ) -> Tuple[Optional[FootprintMatch], List[FootprintMatch]]:
     """Pick the catalog part the measured footprint is, and return the runners-up.
 
-    :func:`lego_catalog.match_footprint` already orders candidates shortest-first, which is the safe
-    default when a footprint is shared by a plate and a brick. ``measured_height`` overrides that
-    ordering, but only when the candidates' heights are far enough apart for depth to have a real say
-    (see :data:`MIN_TRUSTWORTHY_HEIGHT_SEPARATION`) -- otherwise a couple of millimetres of RealSense
-    noise would be deciding it.
+    Candidates come shortest-first, the safe default when a plate and a brick share a footprint.
+    ``measured_height`` overrides that only when their heights are far enough apart for depth to have a
+    real say -- see :data:`MIN_TRUSTWORTHY_HEIGHT_SEPARATION`.
     """
     candidates = match_footprint(catalog, width, length, tolerance, restrict_to=restrict_to)
     if not candidates:
@@ -381,11 +354,8 @@ def identify_part(
 
 
 def combine_views(views: Sequence[ViewFootprint]) -> Tuple[float, float, float, float]:
-    """Average the per-view footprints and report how far apart they were.
-
-    Returns ``(width, length, long_axis_heading, disagreement)``. Headings are averaged modulo 180
-    degrees, because a rectangle's long axis has no head or tail and the two views may well name it
-    in opposite directions.
+    """Average the per-view footprints. Returns ``(width, length, long_axis_heading, disagreement)``;
+    headings are averaged modulo 180 degrees, since a long axis has no head or tail.
     """
     widths = [view.width for view in views]
     lengths = [view.length for view in views]
@@ -408,15 +378,9 @@ def measure_brick(
 ) -> Optional[MeasuredBrick]:
     """Measure and identify the clicked brick from every view that can see it.
 
-    Runs twice by default because the measurement and the height are mutually dependent: the
-    silhouette is projected onto the plane at ``table_z + height`` and corrected for a tilt whose
-    effect scales with ``height``, but ``height`` is what the match is trying to find. Starting from
-    ``initial_height`` and re-running once with the matched height converges immediately -- a 6 mm
-    error in the assumed height moves the measured footprint by well under a millimetre, so the
-    second pass confirms the first far more often than it changes it.
-
-    Returns ``None`` if no view could be measured at all; a measurement that finds no catalog match
-    still comes back, with ``part=None``, so the caller can decide whether to fall back or stop.
+    Runs twice: the silhouette is projected onto the plane at ``table_z + height`` and tilt-corrected by
+    ``height``, which is what the match is trying to find. Converges immediately from ``initial_height``.
+    Returns ``None`` if no view could be measured; no catalog match still returns, with ``part=None``.
     """
     height = initial_height
     result: Optional[MeasuredBrick] = None
@@ -516,9 +480,7 @@ def measure_brick(
     return result
 
 
-# =================================================================================================
-# handoff between submodule_1 (measures) and submodule_2 (grasps)
-# =================================================================================================
+# --- handoff between submodule_1 (measures) and submodule_2 (grasps) ------------------------------
 
 
 def write_handoff(
@@ -571,13 +533,8 @@ def write_handoff(
 
 
 def read_handoff(path: str, max_age: float, expected_position: Optional[Sequence[float]] = None) -> Optional[dict]:
-    """Load submodule_1's handoff, or ``None`` with a reason logged if it should not be trusted.
-
-    Three ways it is refused, all of which mean "this describes a different brick than the one under
-    the gripper": the file is missing, it is older than ``max_age``, or the brick it recorded is not
-    where the arm is now standing. The last one is the useful one -- it catches the arm having been
-    moved, freedriven or re-run between the two scripts, which is exactly when using these dimensions
-    would be wrong.
+    """Load submodule_1's handoff, or ``None`` with a reason logged. Refused if missing, stale, or
+    recording a brick elsewhere than where the arm now stands.
     """
     if not os.path.exists(path):
         logger.warning(f"No brick handoff at {path}; falling back to the default brick dimensions.")

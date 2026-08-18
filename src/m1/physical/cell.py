@@ -1,34 +1,8 @@
 """m1 physical: the cell -- arm, gripper, camera, table. Hardware, no decisions.
 
-The bench counterpart of :mod:`m1.simulation.world`, and deliberately the same shape: the same verbs,
-the same names, the same units, so that :mod:`m1.physical.submodule_1` and
-:mod:`m1.physical.submodule_2` can be read side by side with their simulation twins and differ only
-where the hardware genuinely differs. Everything that talks to a robot, a gripper or a camera lives
-here; nothing here decides anything.
-
-Almost all of it is airo-mono underneath -- ``PositionManipulator`` for the arm, ``RGBDCamera`` for the
-RealSense, ``ParallelPositionGripper`` for the Robotiq, ``SE3Container`` for every pose built by hand.
-This module is the adapter that gives those the vocabulary the simulation already speaks.
-
-**Where the bench and the simulator really differ**, and so where reading the two files side by side
-will show something other than a copy:
-
-* **The TCP is the fingertips, not the flange.** The UR controller carries the tool offset, so
-  ``arm.get_tcp_pose()`` already reports the point the grasp is about, and
-  :func:`top_down_tool_pose` needs no gripper geometry at all. The simulation has to add the flange to
-  fingertip offset itself, and that offset depends on the opening, because a 2F-85's fingertips swing
-  through an arc as the jaws close. Hence :meth:`GripperCalibration.tip_offset` returning zero here:
-  the correction is real, it is just already applied by the controller.
-* **Moves take a speed, not a duration.** A simulated move is integrated for a fixed number of
-  seconds; a real one is commanded at a joint or linear speed and takes as long as it takes. The
-  duration arguments are kept in the signatures so the two modules stay line-for-line comparable, and
-  they are used only to pace the settling waits.
-* **There is no ground truth.** :meth:`SimWorld.nearest_brick` has no counterpart, and neither does
-  ``score_against_truth``. On the bench the only mark on the homework is whether the grasp worked.
-* **The camera pose is measured, not exact.** ``X_base_camera`` is forward kinematics composed with
-  the hand-eye calibration, and the calibration is wrong by millimetres. That single fact is why
-  :mod:`m1.physical.submodule_1` prefers the ray-plane projection where the simulation prefers the
-  triangulation -- see its module docstring.
+Bench counterpart of :mod:`m1.simulation.world`, with the same verbs and units. Differences from the
+simulator: the TCP is the fingertips (the UR controller carries the tool offset), moves take a speed
+rather than a duration, there is no ground truth, and ``X_base_camera`` carries hand-eye error.
 """
 
 from __future__ import annotations
@@ -69,73 +43,50 @@ from common.config import (  # noqa: E402
 )
 from m1.physical.submodule_3 import PileView, capture_pile_view  # noqa: E402
 
-# =================================================================================================
-# the table and the pile
-# =================================================================================================
+# --- the table and the pile -----------------------------------------------------------------------
 
-#: Where on the table the pile is tipped out, in the robot's base frame. **Measure this on your own
-#: bench** -- it only has to be right to a few centimetres (it aims the viewpoints and nothing else),
-#: but a value from somebody else's table points the camera at bare plywood.
-PILE_CENTER: Tuple[float, float] = (0.30, 0.02)
+#: Where the pile is tipped out, base frame. Measure on your own bench; a few cm is close enough.
+#: Taken from the centre of the frame the two viewpoints actually see, as reported by
+#: ``src/tools/diagnose_table.py``. Confirm it with ``src/tools/teach_pose.py`` if the pile moves.
+PILE_CENTER: Tuple[float, float] = (-0.20, -0.32)
 
-#: The arm's parking configuration: elbow up, central, well clear of the table. Every cross-table leg
-#: goes via here for the same reason the simulation does it -- a joint-space straight line between two
-#: poses at opposite edges of the workspace sweeps the wrist through everything in between.
+#: Parking configuration: elbow up, central, clear of the table. Every cross-table leg goes via here.
 HOME_CONFIGURATION = np.array([-0.0834, -1.3199, 0.2621, -0.4055, -1.2062, -1.6360])
 
-#: Known-good viewpoint joint configurations, measured on the bench. Preferred over solving IK for a
-#: Cartesian eye position because they are known to be reachable, comfortable and to see the whole
-#: pile -- none of which a fresh IK solution at the edge of a UR3e's workspace guarantees. Set an
-#: entry to ``None`` to have :func:`m1.physical.submodule_1.observe` solve for the eye position
-#: instead, exactly as the simulation does.
+#: Measured on the bench, preferred over IK: known reachable and known to see the whole pile. Set an
+#: entry to ``None`` to have :func:`m1.physical.submodule_1.observe` solve for the eye position.
 VIEWPOINT_JOINT_CONFIGURATIONS = {
-    "view 1": np.array([0.12758513, -0.99901624, 0.09989340, -0.70460124, -1.25554210, -1.49123317]),
-    "view 2": np.array([0.73017544, -0.93845524, -0.12170899, -0.72688420, -1.73019010, -0.91401703]),
+    "view 1": np.array([-0.17383129, -1.51381945, 1.21881563, -1.11991935, -1.04903251, -1.86176998]),
+    "view 2": np.array([0.88960707, -1.10264479, 0.41630060, -1.06990261, -1.71752865, 0.86208582]),
 }
 
-# =================================================================================================
-# speeds
-# =================================================================================================
+# --- speeds ---------------------------------------------------------------------------------------
 
-#: Fraction of the arm's maximum joint speed. Ten percent is the value the standalone modules have
-#: always run at: fast enough not to be tedious, slow enough that a mistimed move nudges the pile
-#: rather than scattering it.
-DEFAULT_SPEED_RATIO = 10
-#: m/s for the short straight-line moves -- the descent onto a brick and the lift off the table.
-DEFAULT_LINEAR_SPEED = 0.03
-#: The arm has stopped commanding before the camera is asked for a frame. Real joints ring for a
-#: moment after a move completes, and a frame grabbed during the ringing is paired with a TCP pose
-#: that is no longer where the lens was.
+DEFAULT_SPEED_RATIO = 10  # percent of max joint speed
+DEFAULT_LINEAR_SPEED = 0.03  # m/s, for the descent and the lift
+#: Joints ring after a move; a frame grabbed during the ringing gets a stale pose.
 ARM_SETTLE_DURATION = 0.35
 
-GRIPPER_FORCE = 50.0  # newtons; ample for a 1 g brick, gentle enough not to mark it
+GRIPPER_FORCE = 50.0  # newtons
 GRIPPER_SPEED = 0.05  # m/s
 GRIPPER_MOVE_TIMEOUT = 8.0
-#: Finger travel under which a completed-but-timed-out move means "the gripper never moved" rather
-#: than "it stopped early on something". Above the ~0.4 mm register quantisation, far below a grasp.
+#: Travel below which a timed-out move means "never moved", not "stopped on something". Above the
+#: ~0.4 mm register quantisation, far below a grasp.
 GRIPPER_STALL_TOLERANCE_M = 0.002
 
 
-# =================================================================================================
-# the gripper, described the way the simulation describes it
-# =================================================================================================
+# --- the gripper ----------------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
 class GripperCalibration:
-    """The opening range the jaws actually have, and where the fingertips are relative to the TCP."""
+    """The opening range the jaws actually have."""
 
     max_width: float
     min_width: float
 
     def tip_offset(self, width: float) -> float:
-        """Zero, on purpose. See the module docstring.
-
-        The UR controller already carries the tool offset, so the pose ``arm.get_tcp_pose()`` reports
-        *is* the fingertip plane. The simulation's version of this returns a real, opening-dependent
-        distance because there it is measuring from the flange. Keeping the method means the two
-        modules can share a line rather than fork around it.
-        """
+        """Zero: the controller's tool offset already makes ``get_tcp_pose()`` the fingertip plane."""
         return 0.0
 
 
@@ -146,18 +97,12 @@ def _gripper_calibration(gripper: Optional[ParallelPositionGripper]) -> GripperC
     return GripperCalibration(max_width=float(specs.max_width), min_width=float(specs.min_width))
 
 
-# =================================================================================================
-# the cell
-# =================================================================================================
+# --- the cell -------------------------------------------------------------------------------------
 
 
 @dataclass
 class Cell:
-    """A connected bench: arm, camera, optional gripper, and the calibrations that tie them together.
-
-    Hold on to it; every other function in the physical m1 modules takes one. The counterpart of
-    :class:`m1.simulation.world.SimWorld`, with the same verbs.
-    """
+    """A connected bench: arm, camera, optional gripper, and the calibrations tying them together."""
 
     arm: PositionManipulator
     camera: RGBDCamera
@@ -171,17 +116,15 @@ class Cell:
     _started_at: float = field(default_factory=time.monotonic)
     _commanded_width: float = 0.085
 
-    # --- time -------------------------------------------------------------------------------------
     @property
     def elapsed(self) -> float:
-        """Wall-clock seconds since the cell was built, where the simulation reports simulated time."""
+        """Wall-clock seconds since the cell was built."""
         return time.monotonic() - self._started_at
 
     def advance(self, duration: float) -> None:
-        """Wait. The bench's answer to stepping the integrator forward."""
+        """Wait."""
         time.sleep(max(0.0, float(duration)))
 
-    # --- arm --------------------------------------------------------------------------------------
     def arm_positions(self) -> JointConfigurationType:
         return np.asarray(self.arm.get_joint_configuration(), dtype=float)
 
@@ -189,27 +132,21 @@ class Cell:
         return self.arm.get_tcp_pose()
 
     def tcp_pose(self, width: Optional[float] = None) -> HomogeneousMatrixType:
-        """Where the fingertip plane is right now. Identical to :meth:`tool_pose` -- see the docstring."""
+        """The fingertip plane. Identical to :meth:`tool_pose`."""
         return self.arm.get_tcp_pose()
 
     def X_tool_tcp(self, width: float) -> HomogeneousMatrixType:
         return np.eye(4)
 
     def move_arm_to(self, q_goal: Sequence[float], duration: Optional[float] = None) -> None:
-        """Drive the arm to a joint configuration.
-
-        ``duration`` is accepted and ignored: a real move runs at :attr:`joint_speed` and takes as long
-        as the controller needs. It stays in the signature so this reads the same as the simulation's.
-        """
+        """Drive the arm to a joint configuration. ``duration`` is ignored (signature parity)."""
         ensure_control_ready(self.arm)
         self.arm.move_to_joint_configuration(np.asarray(q_goal, float), joint_speed=self.joint_speed).wait()
         self.advance(ARM_SETTLE_DURATION)
 
     def move_tcp_to(self, pose: HomogeneousMatrixType, linear: bool = False) -> None:
-        """Move the TCP to a pose, either as a joint move or as a straight line in the world.
-
-        Straight-line for the short legs among the bricks -- a joint move between two poses only
-        centimetres apart still swings the fingers sideways through the neighbours on the way.
+        """Move the TCP to a pose. Use ``linear`` among the bricks: a joint move between poses
+        centimetres apart still swings the fingers sideways through the neighbours.
         """
         ensure_control_ready(self.arm)
         if linear:
@@ -218,14 +155,8 @@ class Cell:
             self.arm.move_to_tcp_pose(pose, joint_speed=self.joint_speed).wait()
         self.advance(ARM_SETTLE_DURATION)
 
-    # --- gripper ----------------------------------------------------------------------------------
     def finger_width(self) -> float:
-        """The clear distance between the pads, *measured*.
-
-        Measured rather than commanded, which is what makes it a grasp check: told to close past a
-        brick, the fingers stop where the brick is, and the gap between commanded and reached is the
-        whole signal. Exactly what the simulation measures off the two pad frames.
-        """
+        """The measured gap between the pads -- told to close past a brick, the fingers stop on it."""
         if self.gripper is None:
             raise RuntimeError("No gripper is connected to this cell; build it with `with_gripper=True`.")
         return float(self.gripper.get_current_width())
@@ -235,17 +166,22 @@ class Cell:
         return self._commanded_width
 
     def move_gripper_to_width(self, width: float, duration: Optional[float] = None) -> None:
-        """Command an opening and confirm the fingers actually went somewhere.
+        """Command an opening and confirm the fingers moved.
 
-        A Robotiq accepts every command whether or not it is in a state to execute one, so a gripper
-        that never moves looks healthy right up until the grasp is blamed on the brick. Comparing the
-        width before and after separates the two outright.
+        A Robotiq accepts commands it cannot execute, so comparing width before and after is the only
+        way to tell a stuck gripper from a failed grasp.
         """
         if self.gripper is None:
             raise RuntimeError("No gripper is connected to this cell; build it with `with_gripper=True`.")
         width = float(np.clip(width, self.gripper_calibration.min_width, self.gripper_calibration.max_width))
         before = self.finger_width()
         self._commanded_width = width
+        # Re-asserted per move: airo-mono's `move` writes only POS, where ur-rtde's reference driver
+        # sets GTO together with POS/SPE/FOR in one command. Anything that cleared GTO since the cell
+        # was built -- a stopped program, the URCap's own thread -- would otherwise silently swallow
+        # this move and every one after it.
+        with contextlib.suppress(Exception):
+            self.gripper._communicate("SET GTO 1")
         status = self.gripper.move(width, speed=GRIPPER_SPEED, force=GRIPPER_FORCE).wait(timeout=GRIPPER_MOVE_TIMEOUT)
         after = self.finger_width()
         if status is ACTION_STATUS_ENUM.TIMEOUT and abs(after - before) < GRIPPER_STALL_TOLERANCE_M:
@@ -258,13 +194,7 @@ class Cell:
         logger.info(f"Jaws {before * 1000:.1f} -> {after * 1000:.1f} mm (commanded {width * 1000:.0f} mm).")
 
     def is_an_object_grasped(self) -> bool:
-        """The Robotiq's own object-detection flag, read from motor current.
-
-        The simulation has no equivalent and infers the same thing from the pad separation alone. Here
-        both signals are available and both are used, because either one on its own lies: the flag
-        also fires when the fingers stall against each other, and the width alone cannot tell a held
-        brick from one wedged between the pads and a neighbour.
-        """
+        """The Robotiq's object-detection flag. Used with the pad separation, since either alone lies."""
         if self.gripper is None:
             return False
         try:
@@ -273,13 +203,8 @@ class Cell:
             logger.debug(f"Object-detection flag unavailable: {exception}")
             return True
 
-    # --- camera -----------------------------------------------------------------------------------
     def capture(self, name: str = "pile view") -> PileView:
-        """Grab colour, depth and the camera pose together.
-
-        Byte-for-byte the same :class:`~m1.physical.submodule_3.PileView` the simulation renders, which
-        is what lets one perception module serve both.
-        """
+        """Grab colour, depth and the camera pose together."""
         return capture_pile_view(self.arm, self.camera, self.X_tcp_camera, name=name)
 
     def table_z_at(self, x: float, y: float) -> float:
@@ -287,9 +212,7 @@ class Cell:
         return float(c + a * x + b * y)
 
 
-# =================================================================================================
-# building one
-# =================================================================================================
+# --- building one ---------------------------------------------------------------------------------
 
 
 @contextlib.contextmanager
@@ -304,12 +227,9 @@ def build_cell(
     table_z: Optional[float] = None,
     with_gripper: bool = True,
 ) -> Iterator[Cell]:
-    """Connect everything and yield a :class:`Cell`, closing it all again on the way out.
+    """Connect everything and yield a :class:`Cell`, closing it again on the way out.
 
-    The counterpart of ``world.build_world``, and the only place in the physical m1 modules that opens
-    a connection. Everything it needs that is not a wire -- the hand-eye calibration, the touched-off
-    table plane -- is loaded here too, so that a module downstream never has to wonder whether it has
-    them.
+    The only place here that opens a connection; the hand-eye calibration and table plane load here.
     """
     if ip_address is None:
         ip_address = DEFAULT_IP_ADDRESSES[robot_type]
@@ -347,12 +267,9 @@ def build_cell(
 
 
 def resolve_table_plane(table_z: Optional[float] = None) -> Tuple[float, float, float]:
-    """The tabletop as ``z = a*x + b*y + c``, best source first.
+    """The tabletop as ``z = a*x + b*y + c``: touched-off plane, else ``table_z`` level, else config.
 
-    The touched-off plane wins: the arm measured it by touching, so unlike anything the camera says it
-    carries no hand-eye calibration error -- and every brick height is measured from it, so an error
-    here is an error in every brick at once. An explicit ``table_z`` overrides it with a level plane
-    (the tilt is lost), and ``config.TABLE_Z`` is the last resort.
+    The touched-off plane wins because it was measured by touching and so carries no hand-eye error.
     """
     if table_z is not None:
         logger.info(f"table_z {table_z:+.4f} m given; using a level plane at that height.")
@@ -375,9 +292,8 @@ def resolve_table_plane(table_z: Optional[float] = None) -> Tuple[float, float, 
 def connect_gripper(robot_ip: str) -> Iterator[ParallelPositionGripper]:
     """Yield a connected, activated Robotiq 2F-85 that is armed to move.
 
-    Reached through the UR controller's URCap socket on the *robot's* IP, so it needs no address of its
-    own. Deliberately no "open on exit": the point of a successful run is that the brick is still held
-    when it ends.
+    Reached through the UR controller's URCap socket on the robot's IP. No "open on exit": a
+    successful run ends with the brick still held.
     """
     from airo_robots.grippers.hardware.robotiq_2f85_urcap import Robotiq2F85
 
@@ -395,23 +311,52 @@ def connect_gripper(robot_ip: str) -> Iterator[ParallelPositionGripper]:
     yield gripper
 
 
-def arm_gripper_for_motion(gripper: ParallelPositionGripper) -> None:
-    """Make sure the gripper will actually *move* when it is told to, and say so if it will not.
+#: How long to wait for a ``SET GTO 1`` to show up on a read-back, and how many times to re-send it.
+#: Every register write in airo-mono's own driver -- SPE, FOR, POS, ACT -- is wrapped in
+#: ``wait_for_condition_with_timeout`` for exactly this reason: the value is written over Modbus and
+#: read back over a *separate* TCP connection, so an immediate read races the write and legitimately
+#: returns the old value.
+GRIPPER_GTO_TIMEOUT = 1.0
+GRIPPER_GTO_ATTEMPTS = 3
+GRIPPER_GTO_POLL = 0.05
 
-    A Robotiq only moves when three things hold: it is activated (``ACT``/``STA``), it is faultless
-    (``FLT``), and its go-to bit (``GTO``) is set. Register writes are accepted regardless, so a
-    gripper with ``GTO`` clear -- which is how a stopped Polyscope program or an aborted run leaves it
-    -- connects cleanly, reports its width, accepts every command, and never moves.
+
+def read_gripper_register(gripper: ParallelPositionGripper, name: str) -> Optional[int]:
+    """One of the Robotiq's registers as an int, or ``None`` if it could not be read or parsed."""
+    try:
+        return int(gripper._communicate(f"GET {name}").split(" ")[-1])
+    except Exception as exception:  # noqa: BLE001 - a diagnostic read is never worth aborting on
+        logger.debug(f"Could not read the gripper's {name} register: {exception}")
+        return None
+
+
+def set_gripper_gto(gripper: ParallelPositionGripper) -> bool:
+    """Set the go-to bit and wait for it to actually read back set. ``True`` if it did.
+
+    Re-sent rather than written once: the URCap's own background thread also writes the request
+    registers, so a single external write can be overwritten before it takes.
     """
+    for _ in range(GRIPPER_GTO_ATTEMPTS):
+        gripper._communicate("SET GTO 1")
+        deadline = time.monotonic() + GRIPPER_GTO_TIMEOUT
+        while time.monotonic() < deadline:
+            if read_gripper_register(gripper, "GTO") == 1:
+                return True
+            time.sleep(GRIPPER_GTO_POLL)
+    return False
 
-    def read_register(name: str) -> Optional[int]:
-        try:
-            return int(gripper._communicate(f"GET {name}").split(" ")[-1])
-        except Exception as exception:  # noqa: BLE001 - a diagnostic read is never worth aborting on
-            logger.debug(f"Could not read the gripper's {name} register: {exception}")
-            return None
 
-    fault = read_register("FLT")
+def arm_gripper_for_motion(gripper: ParallelPositionGripper) -> None:
+    """Check the gripper will actually move: activated (``STA``), faultless (``FLT``), ``GTO`` set.
+
+    A fault is fatal -- the gripper accepts commands and refuses to move, and only a re-activation on
+    the pendant clears it. A ``GTO`` that will not read back is *not* fatal, and used to be: the read
+    races the write, some URCap versions report the status bit rather than the request bit, and the
+    real test of whether the fingers move is whether the fingers move.
+    :meth:`Cell.move_gripper_to_width` measures that directly and raises on it, so a wrong guess here
+    costs one clear error message at the first move instead of refusing to start at all.
+    """
+    fault = read_gripper_register(gripper, "FLT")
     if fault:
         raise RuntimeError(
             f"The Robotiq reports fault status FLT {fault}. It will accept commands but not move. Clear the "
@@ -420,26 +365,25 @@ def arm_gripper_for_motion(gripper: ParallelPositionGripper) -> None:
     if not gripper.gripper_is_active():
         logger.warning("The gripper is not activated; activating it now (the fingers will open and close once).")
         gripper._activate_gripper()
-    gripper._communicate("SET GTO 1")
-    if read_register("GTO") == 0:
-        raise RuntimeError(
-            "Could not set the gripper's GTO (go-to) bit, so it would accept move commands without moving. "
-            "Check that the Robotiq URCap is running and the robot is in remote control."
+    if not set_gripper_gto(gripper):
+        logger.warning(
+            f"The gripper's GTO bit still reads "
+            f"{read_gripper_register(gripper, 'GTO')} after {GRIPPER_GTO_ATTEMPTS} attempts (STA "
+            f"{read_gripper_register(gripper, 'STA')}, FLT {read_gripper_register(gripper, 'FLT')}). Some URCap "
+            "versions never report it set over the socket even while moving perfectly well, so this is a "
+            "warning and not a refusal: GTO is re-sent with every move, and a gripper that truly does not "
+            "move is caught by the width check on the first command."
         )
 
 
-# =================================================================================================
-# poses -- the same three the simulation builds, built the same way
-# =================================================================================================
+# --- poses ----------------------------------------------------------------------------------------
 
 
 def look_at_tool_pose(cell: Cell, eye: Sequence[float], target: Sequence[float]) -> HomogeneousMatrixType:
-    """The TCP pose that puts the wrist camera at ``eye`` looking at ``target``.
+    """The TCP pose putting the wrist camera at ``eye`` looking at ``target``.
 
-    Built camera-first, because the camera is the thing with a job: pick where the lens should be and
-    what it should see, then let the hand-eye calibration say where the TCP has to be for that. The
-    camera frame follows the optical convention the depth back-projection assumes -- +z out of the
-    lens, +y down -- so "down" in the image is world-down projected into the sensor plane.
+    Built camera-first, in the optical convention the depth back-projection assumes: +z out of the
+    lens, +y down.
     """
     eye = np.asarray(eye, float)
     forward = np.asarray(target, float) - eye
@@ -457,9 +401,8 @@ def look_at_tool_pose(cell: Cell, eye: Sequence[float], target: Sequence[float])
     return X_base_camera @ np.linalg.inv(np.asarray(cell.X_tcp_camera, float))
 
 
-#: Straight-down poses are tried at these yaw offsets before being called unreachable. A parallel-jaw
-#: grasp is unchanged by flipping the fingers end for end, and a UR wrist can often reach the same
-#: orientation a full turn away when it cannot reach it directly -- so all five are the same grasp.
+#: All the same grasp: a parallel jaw is unchanged by flipping end for end, and a UR wrist often
+#: reaches an orientation a full turn away when it cannot reach it directly.
 EQUIVALENT_YAW_OFFSETS = (0.0, math.pi, -math.pi, 2 * math.pi, -2 * math.pi)
 #: The tool axis the fingers close along, set by how the gripper is coupled to the flange.
 CLOSING_AXIS = np.array([0.0, 1.0, 0.0])
@@ -470,12 +413,8 @@ def top_down_tool_pose(
 ) -> HomogeneousMatrixType:
     """TCP pose at ``position``, tool straight down, fingers closing along ``closing_heading``.
 
-    The yaw is *solved* rather than guessed: with yaw = 0 the tool frame is ``Ry(pi)``, which sends the
-    finger axis to a known heading; ``Rz(yaw)`` then turns the whole thing about the vertical until the
-    jaws line up square to the brick's long axis.
-
-    ``width`` is accepted and unused -- the controller carries the tool offset, so the fingertip plane
-    does not move with the opening the way it does in the simulation. See the module docstring.
+    At yaw = 0 the tool frame is ``Ry(pi)``, which sends the finger axis to a known heading; ``Rz(yaw)``
+    turns it square to the brick. ``width`` is unused -- the controller carries the tool offset.
     """
     reference = SE3Container.from_euler_angles_and_translation(np.array([0.0, np.pi, 0.0])).rotation_matrix @ CLOSING_AXIS
     yaw = float(closing_heading) - math.atan2(reference[1], reference[0])
@@ -485,13 +424,11 @@ def top_down_tool_pose(
 
 
 def pose_is_reachable(cell: Cell, pose: HomogeneousMatrixType) -> bool:
-    """Whether the arm can reach ``pose``, checked through the safety limits *and* IK.
+    """Reachable through the safety limits *and* IK.
 
-    ``is_tcp_pose_reachable`` only asks whether the pose is inside the safety planes, which passes for
-    poses no joint configuration can produce; the IK call catches those. IK is queried without a seed
-    on purpose: ur-rtde seeds from the current configuration itself, and passing a numpy seed trips a
-    bug in its wrapper (``joint_configuration_guess or np.array([])`` raises "truth value of an array
-    is ambiguous").
+    ``is_tcp_pose_reachable`` only checks the safety planes, which passes poses no configuration can
+    produce. IK is queried without a seed: ur-rtde seeds itself, and a numpy seed trips a truthiness
+    bug in its wrapper.
     """
     try:
         if not cell.arm.is_tcp_pose_reachable(pose):
@@ -519,11 +456,8 @@ def pose_is_reachable(cell: Cell, pose: HomogeneousMatrixType) -> bool:
 def solve_tool_ik(
     cell: Cell, pose: HomogeneousMatrixType, q_seed: Optional[np.ndarray] = None
 ) -> Optional[JointConfigurationType]:
-    """A joint configuration that reaches ``pose``, or ``None``. The controller's IK, not our own.
-
-    ``q_seed`` is accepted for signature parity with the simulation and deliberately not forwarded:
-    ur-rtde already seeds from the arm's current configuration, and handing it a numpy array trips a
-    truthiness bug in its wrapper.
+    """A joint configuration reaching ``pose``, or ``None``. ``q_seed`` is not forwarded -- see
+    :func:`pose_is_reachable`.
     """
     if not pose_is_reachable(cell, pose):
         return None
@@ -537,11 +471,7 @@ def solve_tool_ik(
 def solve_top_down_ik(
     cell: Cell, position: Sequence[float], closing_heading: float, width: float = 0.0
 ) -> Optional[Tuple[HomogeneousMatrixType, JointConfigurationType, float]]:
-    """A reachable straight-down pose at ``position`` closing along ``closing_heading``, and its IK.
-
-    Tries the equivalent yaws in order of how far the wrist has to travel. Returns
-    ``(pose, joint_configuration, heading_used)``, or ``None`` if none of them are reachable.
-    """
+    """``(pose, joint_configuration, heading_used)`` for a reachable equivalent yaw, else ``None``."""
     for offset in EQUIVALENT_YAW_OFFSETS:
         heading = float(closing_heading) + offset
         pose = top_down_tool_pose(cell, position, heading, width)
@@ -563,7 +493,7 @@ def stop_arm(cell: Cell) -> None:
 
 
 def reach_warning(cell: Cell, position: Sequence[float]) -> Optional[str]:
-    """A sentence about the target being near the arm's limit, or ``None`` if it comfortably is not."""
+    """A sentence about the target being near the arm's limit, or ``None``."""
     horizontal = float(np.hypot(position[0], position[1]))
     limit = APPROX_ARM_REACH.get(cell.robot_type, 0.5)
     if horizontal <= 0.9 * limit:

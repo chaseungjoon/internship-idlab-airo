@@ -48,17 +48,16 @@ from common.config import (  # noqa: E402
 PILE_VIEW: List[float] = [-0.08343679, -1.31992237, 0.26209098, -0.40548201, -1.20620281, -1.63604099]
 
 # --- working resolution ---------------------------------------------------------------------------
-# Every stage below runs on a copy of the frame resized to this long side, and the intrinsics are
-# scaled with it, so a 1080p and a 720p capture behave identically. The pixel thresholds are all
-# derived from millimetres at runtime (see PixelScale), so the resize is about cost, not tuning.
+# Every stage runs on a copy resized to this long side, intrinsics scaled with it, so 1080p and 720p
+# behave identically. Pixel thresholds derive from millimetres at runtime (see PixelScale), so the
+# resize is about cost, not tuning.
 WORKING_LONG_SIDE = 1280
 
 # --- what the depth stream is allowed to say ------------------------------------------------------
 MIN_VALID_DEPTH = 0.10  # metres; below this the RealSense is reporting its own blind zone
 MAX_VALID_DEPTH = 1.50
-# Height band, above the touched-off table plane, that the scene is allowed to occupy. Below the floor
-# is depth noise punching through the tabletop; above the ceiling is the gripper, an arm or a hand,
-# none of which are the pile.
+# Height band above the table the scene may occupy. Below the floor is depth noise punching through
+# the tabletop; above the ceiling is the gripper, an arm or a hand.
 SCENE_FLOOR_M = -0.010
 SCENE_CEILING_M = 0.100
 TABLE_BAND_M = 0.0015  # within this of the plane, a pixel is bare table and seeds the colour model
@@ -69,17 +68,15 @@ TABLE_MODEL_ITERATIONS = 3  # fewer than the RGB-only version needs: the depth s
 BACKGROUND_DOWNSAMPLE_SIGMA_PX = 8.0
 TABLE_INLIER_SIGMA = 2.5
 
-# --- foreground ----------------------------------------------------------------------------------
-# Depth first, and the thresholds are set by the thinnest part rather than by the noise: a lego plate
-# is 3.2 mm tall and is the shortest thing that can be on the table, so a "strong" step has to be
-# comfortably under that or every plate in the pile is invisible. What makes 2.5 mm safe against a
-# RealSense's per-pixel noise is that the height map is median-filtered over a millimetre or so first
-# (see _denoise_height) -- a plate is 8 mm across at its narrowest, so it survives that filter whole
-# while single-pixel depth speckle does not.
+# --- foreground -----------------------------------------------------------------------------------
+# Depth first, with thresholds set by the thinnest part rather than by the noise: a plate is 3.2 mm,
+# so a "strong" step must be comfortably under that or every plate is invisible. 2.5 mm is safe
+# against RealSense noise because the height map is median-filtered over ~1 mm first (_denoise_height)
+# -- a plate is 8 mm across and survives that whole, single-pixel speckle does not.
 FOREGROUND_STRONG_HEIGHT_M = 0.0025
 FOREGROUND_WEAK_HEIGHT_M = 0.0010
-# Colour, in standard deviations of the table's own scatter, used where the depth map has holes --
-# which on a brick's edges, on dark plastic and on anything glossy is most of the interesting pixels.
+# Colour, in sigmas of the table's own scatter, used where depth has holes -- which on brick edges,
+# dark plastic and anything glossy is most of the interesting pixels.
 FOREGROUND_STRONG_SIGMA = 7.0
 FOREGROUND_WEAK_SIGMA = 3.5
 FOREGROUND_SEED_AREA_MM2 = 15.0
@@ -87,16 +84,14 @@ FOREGROUND_CLOSE_MM = 2.0
 FOREGROUND_OPEN_MM = 1.2
 FOREGROUND_MIN_AREA_MM2 = 40.0
 
-# The bricks were all tipped out in one place, so the pile's own footprint grown by a margin is the
-# workspace, and a mark on the wood at the far edge of the table is not.
+# The bricks were tipped out in one place, so the pile's footprint grown by a margin is the workspace.
 PILE_BRIDGE_MM = 12.0  # blobs closer than this belong to the same pile
 PILE_MARGIN_MM = 30.0  # how far outside the pile's hull a brick that skidded clear is still workspace
 
-# --- instance splitting -----------------------------------------------------------------------------
+# --- instance splitting ---------------------------------------------------------------------------
 EDGE_BLUR_MM = 0.9  # smooths stud shading and grain so only brick borders survive as ridges
-# A height step this big is a full border on its own, whatever the two bricks' colours are. Half a
-# plate: two bricks lying side by side on the table rarely differ by more than noise, two stacked ones
-# differ by a whole part height.
+# A height step this big is a full border whatever the colours. Half a plate: two bricks side by side
+# rarely differ by more than noise, two stacked ones differ by a whole part height.
 HEIGHT_EDGE_SCALE_M = 0.0016
 SEED_GRADIENT_FRACTION = 0.30  # a watershed seed is foreground flatter than this much of the 95th pct
 SEED_MIN_AREA_MM2 = 12.0
@@ -113,9 +108,9 @@ SPLIT_MIN_EDGE = 0.30  # a cut has to run along a real gradient ridge, not throu
 SPLIT_MAX_DEPTH = 3
 
 # --- what counts as a brick -----------------------------------------------------------------------
-# A 1x1 plate is 7.8 mm square and 61 mm2, and it is the smallest part in the catalogue. Under
-# MIN_BRICK_AREA_MM2 a region is a screw hole or a chip in the wood -- both of which are otherwise
-# perfect grasps, being small and alone, which is exactly why the floor is here.
+# A 1x1 plate is 7.8 mm square and 61 mm2, the smallest part in the catalogue. Under MIN_BRICK_AREA_MM2
+# a region is a screw hole or a chip in the wood -- both otherwise perfect grasps, being small and
+# alone, which is why the floor is here.
 MIN_BRICK_AREA_MM2 = 45.0
 MAX_BRICK_AREA_MM2 = 2500.0  # 5 x 5 cm; larger than any part in the set, so it is a merge failure
 MIN_BRICK_SIDE_MM = 6.0
@@ -126,21 +121,13 @@ MIN_BRICK_HEIGHT_M = 0.0018  # under this a region is at table level, so it is t
 MAX_BRICK_HEIGHT_M = 0.060  # a stack six bricks tall; taller than that is not the pile
 
 # How sure the detector is that a region is a brick at all. With depth the answer is nearly always
-# obvious, so the cues are mostly a way of noticing when it is not:
-#
-#   height -- how far off the table it stands, which is the whole question
-#   flatness -- the spread of heights across it. One brick's top face is flat; a region covering two
-#       stacked bricks, or a brick and the table beside it, is not
-#   coverage -- how much of the region the depth stream actually returned. A region with no depth is
-#       being judged on colour alone, and says so
-#   deviation -- how far its colour is from the table's, in the table's own sigmas
-#
-# Below MIN_DEPTH_COVERAGE the depth cues have nothing to say and the RGB-only confidence from
-# pile_perception.py is used instead, so a brick the RealSense could not see is still a candidate --
-# just a less trusted one.
-# A plate is 3.2 mm and nothing else on this table is 3 mm thick, so a region standing that far off it
-# is as certain as the cue ever gets; asking for a full brick's 9.6 mm would rate every plate in the
-# pile as a maybe.
+# obvious, so the cues are mostly a way of noticing when it is not: how far off the table it stands,
+# how flat it is (one top face is flat; two stacked bricks are not), how much depth was returned, and
+# how far its colour is from the table's. Below MIN_DEPTH_COVERAGE the depth cues have nothing to say
+# and pile_perception.py's RGB-only confidence is used instead, so a brick the RealSense could not see
+# is still a candidate -- just a less trusted one.
+# A plate is 3.2 mm and nothing else here is that thick, so standing this far off the table is as
+# certain as the cue gets; asking for a full 9.6 mm would rate every plate as a maybe.
 CONFIDENT_HEIGHT_M = 0.0032
 FLATNESS_TOL_M = 0.0030
 CONFIDENT_COVERAGE = 0.55
@@ -156,11 +143,10 @@ RING_MIN_TABLE_PX = 40  # below this much bare table beside it, the texture cue 
 MIN_BRICK_CONFIDENCE = 0.45  # under this the region is dropped outright
 PRIORITY_MIN_CONFIDENCE = 0.70  # under this it is reported and outlined, but never sent the arm at
 
-# --- the gripper ------------------------------------------------------------------------------------
-# Robotiq 2F-85. The jaws close on the brick's two long sides, so the brick's short side is the width
-# the gripper has to span and the long sides are where the fingertips need room. The usable width is
-# the stroke less the margin submodule_2 opens to before descending -- a brick that only fits with the
-# fingers already touching it cannot be approached.
+# --- the gripper ----------------------------------------------------------------------------------
+# Robotiq 2F-85. The jaws close on the brick's long sides, so its short side is the width to span and
+# the long sides are where the fingertips need room. Usable width is the stroke less the margin
+# submodule_2 opens to before descending.
 GRIPPER_STROKE_MM = 85.0
 GRIPPER_APPROACH_MARGIN_MM = 14.0
 GRIPPER_MIN_WIDTH_MM = 4.0
@@ -168,13 +154,11 @@ GRIPPER_MAX_WIDTH_MM = GRIPPER_STROKE_MM - GRIPPER_APPROACH_MARGIN_MM
 GRIPPER_IDEAL_WIDTH_MM = 16.0
 GRIPPER_WIDTH_SIGMA_MM = 12.0
 FINGER_HALF_THICKNESS_MM = 6.0  # room one fingertip needs beside the brick
-# How far down a part's side the fingertips can get before the table stops them, and how much of that
-# is enough. A 2F-85's pads are 37 mm tall, but what actually holds a part is the few millimetres of
-# it they can reach past: a 9.6 mm brick offers 8 mm of side wall, a 3.2 mm plate offers 1.7 mm, and
-# a plate is the part that gets shoved out from between the closing fingers rather than pinched.
-# Nothing else in the score notices the difference -- a plate lying alone on bare table scores full
-# marks on clearance, isolation, exposure and visibility -- so without this term the ranking sends the
-# arm at the hardest grasps in the pile first.
+# How far down a part's side the fingertips reach before the table stops them, and how much is enough.
+# The pads are 37 mm tall, but what holds a part is the few millimetres they can reach past: a 9.6 mm
+# brick offers 8 mm of side wall, a 3.2 mm plate offers 1.7 mm. Nothing else in the score notices --
+# a plate alone on bare table scores full marks everywhere else -- so without this term the ranking
+# sends the arm at the hardest grasps first.
 FINGERTIP_CLEARANCE_MM = 1.5  # kept above the table, matching submodule_2's descent cap
 GRIP_DEPTH_GOOD_MM = 6.0  # engagement at which the term saturates
 CLEARANCE_GOOD_MM = 14.0  # fingertip room at which the clearance term saturates
@@ -182,10 +166,9 @@ ISOLATION_GOOD_MM = 26.0  # gap to the rest of the pile at which the isolation t
 CONFIDENT_AREA_MM2 = 260.0  # footprint of a 2x4 plate; the area term saturates there
 BURIAL_SCALE_M = 0.006  # neighbours this much taller than a brick mean it is underneath them
 
-# --- the top-down map -------------------------------------------------------------------------------
-# Clearance is measured on an orthographic millimetre raster of the table rather than in image pixels,
-# because a pixel near the top of the frame and one near the bottom are not the same number of
-# millimetres and a perspective distance transform quietly mixes the two.
+# --- the top-down map -----------------------------------------------------------------------------
+# Clearance is measured on an orthographic millimetre raster rather than in image pixels, because a
+# pixel near the top of the frame and one near the bottom are not the same number of millimetres.
 TOPDOWN_MM_PER_CELL = 1.0
 TOPDOWN_MARGIN_MM = 40.0
 TOPDOWN_MAX_CELLS = 1200  # per side; a guard against a stray footprint blowing the raster up
@@ -207,8 +190,8 @@ SCORE_WEIGHTS = {
 PRIORITY_COUNT = 5
 MAX_REACHABILITY_CHECKS = 12  # IK round trips are not free; see assign_priorities
 
-# name -> RGB, for reporting the colour family only; the pile has no red or yellow parts but a
-# nearest-neighbour palette needs the poles present to not drag other colours towards its members.
+# name -> RGB, for reporting the colour family. The pile has no red or yellow parts, but a
+# nearest-neighbour palette needs the poles present so they do not drag other colours in.
 COLOUR_PALETTE: Dict[str, Tuple[int, int, int]] = {
     "white": (240, 240, 235),
     "light_grey": (175, 181, 182),
@@ -231,9 +214,7 @@ MIN_BASE_DISTANCE = 0.15
 WORKSPACE_MARGIN = 0.90
 
 
-# =================================================================================================
-# what one look at the pile consists of
-# =================================================================================================
+# --- what one look at the pile consists of --------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -279,10 +260,8 @@ class PileView:
 
 @dataclass(frozen=True)
 class PixelScale:
-    """How many working-resolution pixels a millimetre on the table is worth.
-
-    Straight off the pinhole model at the distance the pile actually is: ``f / Z``. It is what turns
-    every threshold in this file from a number tuned against one photograph into a physical size.
+    """How many working-resolution pixels a millimetre on the table is worth: ``f / Z`` off the pinhole
+    model, which is what turns every threshold here into a physical size.
     """
 
     px_per_mm: float
@@ -337,10 +316,9 @@ class TableModel:
     def deviation(self) -> np.ndarray:
         """Distance from the table, in sigmas, treating shadow as table and highlight as not.
 
-        Chroma is used in both directions: a brick of any colour but the wood's own moves off the
-        table's chroma axis. Brightness is used upwards only, because a pixel darker than the table
-        is the shadow every brick casts, while a pixel brighter than it is a tan or white brick --
-        the parts that share the wood's hue and would otherwise be invisible to the chroma term.
+        Chroma is used in both directions: a brick of any colour but the wood's moves off the table's chroma
+        axis. Brightness upwards only, because a pixel darker than the table is the shadow every brick casts,
+        while a brighter one is a tan or white brick -- the parts that share the wood's hue.
         """
         chroma = self.residual[..., :2]
         cinv = np.linalg.inv(self.covariance[:2, :2])
@@ -441,9 +419,7 @@ class PileAnalysis:
         return None
 
 
-# =================================================================================================
-# capture
-# =================================================================================================
+# --- capture --------------------------------------------------------------------------------------
 
 
 def capture_pile_view(
@@ -456,10 +432,8 @@ def capture_pile_view(
 ) -> PileView:
     """Move to the viewpoint if one is given, then grab colour, depth and the camera pose together.
 
-    The arm is stationary by the time the frame is grabbed, so the image and the TCP pose it is paired
-    with describe the same instant -- which is the whole basis of the eye-in-hand back-projection.
-    Colour and depth come from one ``grab_images`` buffer, so the height map describes the pixels the
-    segmentation is about to run on and not the ones from a frame earlier.
+    The arm is stationary by then, so the image and the TCP pose describe the same instant -- the basis
+    of the eye-in-hand back-projection. Colour and depth come from one ``grab_images`` buffer.
     """
     if arm is not None and joint_configuration is not None:
         logger.info(f"Moving to the pile viewpoint: {np.round(joint_configuration, 3)} rad ...")
@@ -500,11 +474,9 @@ def resize_to_working_resolution(
 ) -> Tuple[np.ndarray, CameraIntrinsicsMatrixType, Optional[np.ndarray], float]:
     """Shrink the frame to :data:`WORKING_LONG_SIDE` and carry the intrinsics and depth with it.
 
-    The intrinsics have to be scaled too, or every back-projection below lands somewhere else. Pixel
-    *centres* are what map linearly under a resize, hence the half-pixel shift on the principal point;
-    ignoring it is a half-pixel bias, which is under a tenth of a millimetre here but costs nothing to
-    get right. Depth is resampled nearest-neighbour so no pixel ends up holding the average of a
-    brick's top face and the table beside it.
+    The intrinsics are scaled too, or every back-projection lands elsewhere; pixel *centres* map linearly
+    under a resize, hence the half-pixel shift on the principal point. Depth is resampled
+    nearest-neighbour so no pixel holds the average of a top face and the table beside it.
     """
     height, width = image.shape[:2]
     ratio = WORKING_LONG_SIDE / max(height, width)
@@ -525,9 +497,7 @@ def resize_to_working_resolution(
     return resized, K, resized_depth, scale
 
 
-# =================================================================================================
-# geometry: pixels to the base frame
-# =================================================================================================
+# --- geometry: pixels to the base frame -----------------------------------------------------------
 
 
 def back_project_depth(
@@ -551,9 +521,8 @@ def back_project_depth(
 def _fill_invalid(values: np.ndarray, valid: np.ndarray) -> np.ndarray:
     """``values`` with every invalid pixel replaced by its nearest valid neighbour.
 
-    Needed before any spatial filter touches the height map: a hole holds 0, and 0 is not "missing"
-    to a median or a Sobel, it is "exactly at table height" -- so an unfilled hole reads as a crater
-    and every hole edge reads as a cliff.
+    A hole holds 0, and 0 is not "missing" to a median or a Sobel but "exactly at table height", so an
+    unfilled hole reads as a crater and every hole edge as a cliff.
     """
     if valid.all() or not valid.any():
         return values
@@ -564,11 +533,9 @@ def _fill_invalid(values: np.ndarray, valid: np.ndarray) -> np.ndarray:
 def _denoise_height(height: np.ndarray, valid: np.ndarray, px_per_mm: float) -> np.ndarray:
     """Median-filter the height map over about a millimetre of table.
 
-    A median rather than a blur, because the whole point of the map is its steps: a blur would ramp
-    the 3.2 mm edge of a plate over its own kernel and take the thinnest parts in the pile with it,
-    while a median leaves a step a step and simply deletes the isolated pixels a stereo depth sensor
-    scatters over a matte surface. One millimetre is far below the 7.8 mm narrowest part and far above
-    the speckle.
+    A median rather than a blur: a blur would ramp a plate's 3.2 mm edge over its own kernel, while a
+    median leaves a step a step and deletes the isolated pixels a stereo sensor scatters. One millimetre
+    is far below the 7.8 mm narrowest part and far above the speckle.
     """
     if not valid.any():
         return height
@@ -585,12 +552,9 @@ def project_pixels_onto_plane(
 ) -> Optional[np.ndarray]:
     """Back-project ``(N, 2)`` pixels onto the plane ``z = a*x + b*y + c``, in the base frame.
 
-    The tilted generalisation of intersecting a ray with a horizontal plane, so a tabletop that is not
-    exactly square to the robot's base is followed rather than averaged away -- 1 degree of tilt is
-    7 mm across a 40 cm workspace, which is wider than the brick.
-
-    Returns ``None`` if any ray runs away from the plane instead of crossing it, which means the
-    outline being projected is not on the table at all.
+    Tilted, so a tabletop not square to the base is followed rather than averaged away -- 1 degree is
+    7 mm across a 40 cm workspace. ``None`` if any ray runs away from the plane, meaning the outline
+    being projected is not on the table.
     """
     a, b, c = plane
     homogeneous = np.column_stack([np.asarray(pixels, float), np.ones(len(pixels))])
@@ -615,9 +579,8 @@ def _plane_grid(
 ) -> np.ndarray:
     """Where every pixel's ray crosses the table plane, as an ``(H, W, 2)`` map of base-frame x, y.
 
-    Used for the things that need a position for *every* pixel -- the reach mask, and a fallback x, y
-    wherever the depth map has a hole. A brick 10 mm off the table lands a fraction of a millimetre
-    from its true x, y this way, which is well inside what the hand-eye calibration contributes.
+    For the things needing a position for *every* pixel -- the reach mask, and a fallback x, y where the
+    depth map has holes. A brick 10 mm off the table lands a fraction of a millimetre out this way.
     """
     height, width = shape
     a, b, c = plane
@@ -689,9 +652,7 @@ def build_scene(view: PileView, plane: Tuple[float, float, float], robot_type: s
     )
 
 
-# =================================================================================================
-# the table's appearance
-# =================================================================================================
+# --- the table's appearance -----------------------------------------------------------------------
 
 
 def opponent_image(bgr: np.ndarray, sigma: float = 1.6) -> np.ndarray:
@@ -703,10 +664,8 @@ def opponent_image(bgr: np.ndarray, sigma: float = 1.6) -> np.ndarray:
 
 
 def _normalized_convolution(values: np.ndarray, weights: np.ndarray, sigma: float) -> np.ndarray:
-    """Blur ``values`` over only the pixels ``weights`` selects, and renormalize.
-
-    Done on a shrunk copy: the result is a blur this wide, so it holds nothing the small image
-    cannot, and a kernel of a few hundred pixels costs a hundred times what one of a few does.
+    """Blur ``values`` over only the pixels ``weights`` selects, and renormalize. Done on a shrunk copy: the
+    result holds nothing the small image cannot, and a wide kernel costs a hundred times a narrow one.
     """
     h, w = weights.shape
     step = max(1, int(sigma / BACKGROUND_DOWNSAMPLE_SIGMA_PX))
@@ -721,14 +680,10 @@ def _normalized_convolution(values: np.ndarray, weights: np.ndarray, sigma: floa
 def fit_table_model(opponent: np.ndarray, seed: np.ndarray) -> TableModel:
     """Blur the table's own pixels into an estimate of it, re-deciding which pixels those are.
 
-    A polynomial over the whole board cannot follow the lighting band along one edge, and a plain blur
-    is dragged upward by the pile sitting in the middle of it. Weighting the blur by the current table
-    mask does both: the estimate under the pile is extrapolated from the wood ringing it, and the mask
-    sharpens each round as the bricks drop out of it.
-
-    ``seed`` is where the table is *known* to be -- the depth map's answer -- which is why this needs
-    half the iterations the RGB-only version does. Without depth the seed is the whole region and this
-    reduces exactly to it.
+    A polynomial cannot follow the lighting band along one edge, and a plain blur is dragged up by the
+    pile. Weighting the blur by the current table mask does both: the estimate under the pile is
+    extrapolated from the wood ringing it, and the mask sharpens each round. ``seed`` is where depth
+    *knows* the table is, which halves the iterations; without it the seed is the whole region.
     """
     sigma = TABLE_MODEL_SIGMA_FRAC * float(np.hypot(*opponent.shape[:2]))
     inliers = seed.copy()
@@ -761,9 +716,7 @@ def build_table_model(scene: Scene) -> Tuple[TableModel, np.ndarray]:
     return fit_table_model(opponent, seed), region
 
 
-# =================================================================================================
-# foreground
-# =================================================================================================
+# --- foreground -----------------------------------------------------------------------------------
 
 
 def _drop_small(mask: np.ndarray, min_area: int) -> np.ndarray:
@@ -794,17 +747,11 @@ def pile_workspace(strong: np.ndarray, region: np.ndarray, scale: PixelScale) ->
 def segment_foreground(scene: Scene, deviation: np.ndarray, region: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     """Brick pixels vs. table pixels, by height where depth reaches and by colour where it does not.
 
-    Hysteresis, as in the RGB-only version: a brick has to be unmistakable somewhere (STRONG) to be
-    admitted, and is then grown to its full silhouette (WEAK). What changed is that "unmistakable" now
-    means "4 mm off the table" wherever the RealSense returned a reading, and only falls back to
-    "7 sigma from the table's colour" where it did not -- which is why a knot in the plywood no longer
-    has a vote and a dark brick the depth stream missed still does.
-
-    The workspace crop is where the two differ most. ``pile_perception.py`` has to crop to the pile's
-    own footprint, because colour alone cannot tell a tan brick at the edge of the board from a stain
-    in the wood, and the bricks were at least all tipped out in one place. Here the crop is only
-    applied to the pixels the depth map could not see: anything standing measurably off the table is
-    a brick wherever on the table it is, including the one that skidded away from the pile.
+    Hysteresis: a brick must be unmistakable somewhere (STRONG) to be admitted, then grown to its full
+    silhouette (WEAK). "Unmistakable" now means 4 mm off the table wherever depth returned a reading,
+    falling back to 7 sigma from the table's colour where it did not, so a knot in the plywood has no
+    vote. The workspace crop applies only to pixels depth could not see -- anything standing measurably
+    off the table is a brick wherever it is, including one that skidded clear.
     """
     scale = scene.scale
     depth_strong = scene.depth_valid & (scene.height > FOREGROUND_STRONG_HEIGHT_M)
@@ -815,13 +762,12 @@ def segment_foreground(scene: Scene, deviation: np.ndarray, region: np.ndarray) 
     seed = cv2.morphologyEx((region & depth_strong).astype(np.uint8), cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
     seed = _drop_small(seed, scale.area(FOREGROUND_SEED_AREA_MM2))
     if seed.any():
-        # Depth found the bricks, so the workspace is the whole reachable tabletop and the pile hull
-        # only decides where an unsupported *colour* detection is still allowed to be believed.
+        # Depth found the bricks, so the workspace is the whole reachable tabletop; the pile hull only
+        # decides where an unsupported *colour* detection is still believed.
         workspace = region
         colour_region = pile_workspace(seed, region, scale)
     else:
-        # No depth anywhere: this is pile_perception.py's situation exactly, so use its answer -- the
-        # pile's own footprint, grown by a margin, cropping everything the colour test might invent.
+        # No depth anywhere: pile_perception.py's situation exactly, so use its answer.
         logger.warning(
             "Nothing stands measurably above the table in the depth map, so the pile is being found by "
             "colour alone and cropped to its own footprint, as the robot-free pile_perception.py does."
@@ -850,23 +796,16 @@ def segment_foreground(scene: Scene, deviation: np.ndarray, region: np.ndarray) 
     return ndi.binary_fill_holes(fg > 0).astype(np.uint8), workspace
 
 
-# =================================================================================================
-# instances
-# =================================================================================================
+# --- instances ------------------------------------------------------------------------------------
 
 
 def edge_strength(model: TableModel, scene: Scene) -> Tuple[np.ndarray, np.ndarray]:
     """Border evidence, from colour and from height, on one 0..1 scale.
 
-    Dividing each colour channel by the table's own scatter is what lets one number stand for both
-    "these two bricks are different colours" and "there is a shadow line between them"; in raw values
-    the intensity channel would drown the chroma ones and same-brightness neighbours of different
-    colours would have no border at all.
-
-    The height gradient is then folded in with a max rather than a sum: a step from one brick down to
-    the one below it is a border on its own evidence, whatever the two look like, and taking the
-    larger of the two cues keeps the combined number on the same 0..1 scale the merge and split
-    thresholds are written in.
+    Each colour channel is divided by the table's own scatter, so one number covers both "different
+    colours" and "a shadow line"; in raw values the intensity channel would drown the chroma ones. The
+    height gradient is folded in with a max, not a sum: a step down to the brick below is a border on its
+    own evidence, and the max keeps the result on the 0..1 scale the thresholds are written in.
     """
     normalized = np.clip((model.residual / model.sigma) * 24.0 + 128.0, 0, 255).astype(np.uint8)
     blurred = cv2.GaussianBlur(normalized.astype(np.float32), (0, 0), max(EDGE_BLUR_MM * scene.scale.px_per_mm, 0.6))
@@ -881,9 +820,8 @@ def edge_strength(model: TableModel, scene: Scene) -> Tuple[np.ndarray, np.ndarr
 def height_edges(scene: Scene) -> np.ndarray:
     """Normalized border evidence from the height map alone; 0 wherever depth is missing.
 
-    Both neighbours have to have depth for a step between them to mean anything, so the gradient is
-    computed on a height map with the holes filled by their nearest valid neighbour and then masked
-    back to where the reading was real. Without that, every hole edge reads as a metre-high cliff.
+    Both neighbours need depth for a step to mean anything, so the gradient is computed on a hole-filled
+    map and then masked back to where the reading was real.
     """
     if not scene.depth_valid.any():
         return np.zeros(scene.shape, np.float32)
@@ -891,8 +829,8 @@ def height_edges(scene: Scene) -> np.ndarray:
     smooth = cv2.GaussianBlur(filled.astype(np.float32), (0, 0), max(0.8 * scene.scale.px_per_mm, 0.6))
     gx = cv2.Sobel(smooth, cv2.CV_32F, 1, 0, 3)
     gy = cv2.Sobel(smooth, cv2.CV_32F, 0, 1, 3)
-    # Sobel's 3x3 kernel sums to 8 over a unit step, so dividing by 8 puts the result back in metres
-    # per pixel; a step of HEIGHT_EDGE_SCALE_M across one pixel is then a full-strength border.
+    # Sobel's 3x3 kernel sums to 8 over a unit step, so dividing by 8 gives metres per pixel; a step of
+    # HEIGHT_EDGE_SCALE_M across one pixel is a full-strength border.
     magnitude = np.sqrt(gx * gx + gy * gy) / 8.0
     reliable = cv2.erode(scene.depth_valid.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
     return np.where(reliable, np.clip(magnitude / HEIGHT_EDGE_SCALE_M, 0.0, 1.0), 0.0).astype(np.float32)
@@ -970,8 +908,8 @@ def _adjacency(labels: np.ndarray, gradient_norm: np.ndarray) -> Tuple[np.ndarra
 
     flat = np.concatenate(keys)
     grads = np.concatenate(values)
-    # Median rather than mean along the border: a stud rim clipping the border, or the one corner
-    # where two bricks really do touch, must not by itself make a border out of a non-border.
+    # Median rather than mean along the border, so a stud rim or a single touching corner cannot by
+    # itself make a border out of a non-border.
     order = np.lexsort((grads, flat))
     unique, starts, lengths = np.unique(flat[order], return_index=True, return_counts=True)
     strengths = grads[order][starts + lengths // 2]
@@ -1024,10 +962,9 @@ def merge_regions(labels: np.ndarray, model: TableModel, scene: Scene, gradient_
     """Glue the fragments of each brick back together: same colour, same height, no border between.
 
     Lego is moulded in flat uniform colour, so two pieces of one brick match closely while two bricks
-    rarely do -- but two neighbouring bricks of the *same* colour also match, which is why the gradient
-    along the shared border has to be weak as well, and why the height has to agree: the commonest way
-    for two same-coloured bricks to sit against each other with no visible seam is for one to be lying
-    on the other, and that is a 3 to 10 mm step.
+    rarely do -- but two neighbouring bricks of the *same* colour also match, hence the border and height
+    tests too: the commonest way for two same-coloured bricks to sit seamlessly is one lying on the
+    other, and that is a 3 to 10 mm step.
     """
     feature = model.residual / model.sigma
     for _ in range(MERGE_ROUNDS):
@@ -1038,8 +975,8 @@ def merge_regions(labels: np.ndarray, model: TableModel, scene: Scene, gradient_
             break
         colours = np.linalg.norm(means[pairs[:, 0]] - means[pairs[:, 1]], axis=1)
         steps = np.abs(heights[pairs[:, 0]] - heights[pairs[:, 1]])
-        # A pair with no depth on one side has a NaN step and cannot be refused on height, so it
-        # falls back to the colour and border tests alone -- which is the RGB-only behaviour.
+        # A pair with no depth on one side has a NaN step and cannot be refused on height, so it falls
+        # back to colour and border alone -- the RGB-only behaviour.
         with np.errstate(invalid="ignore"):
             level = ~(steps > MERGE_HEIGHT_TOL_M)
         small = np.minimum(areas[pairs[:, 0]], areas[pairs[:, 1]]) < scene.scale.area(MERGE_ABSORB_AREA_MM2)
@@ -1055,9 +992,8 @@ def merge_regions(labels: np.ndarray, model: TableModel, scene: Scene, gradient_
         selected = np.nonzero(joins | absorbs)[0]
         for i in selected[np.argsort(colours[selected] + edges[selected])]:
             a, b = int(pairs[i, 0]), int(pairs[i, 1])
-            # Two same-coloured bricks lying at an angle to each other pass the colour and border
-            # tests and would fuse into an L, which no lego part is. Absorbing a fragment is exempt:
-            # a fragment is part of a brick, so it can only make the shape better.
+            # Two same-coloured bricks at an angle pass the colour and border tests and would fuse into an
+            # L, which no lego part is. Absorbing a fragment is exempt: it can only make the shape better.
             if not small[i] and _union_fill_ratio(labels, a, b) < MERGE_MIN_FILL:
                 continue
             uf.union(a, b)
@@ -1074,9 +1010,9 @@ def merge_regions(labels: np.ndarray, model: TableModel, scene: Scene, gradient_
 def _best_cut(mask: np.ndarray, gradient_norm: np.ndarray, scale: PixelScale) -> Optional[Tuple[np.ndarray, np.ndarray]]:
     """Split a region with one straight cut across a gradient ridge, if there is one to cut on.
 
-    A lego silhouette is a rectangle, so a region that fills its own minimum-area box badly is two
-    bricks the colour test could not tell apart. Both cut directions are tried, because two bricks
-    lying side by side and two lying end to end need opposite cuts.
+    A lego silhouette is a rectangle, so a region that fills its own minimum-area box badly is two bricks
+    the colour test could not separate. Both cut directions are tried: side by side and end to end need
+    opposite cuts.
     """
     rect = _obb(mask)
     if rect is None:
@@ -1185,9 +1121,7 @@ def segment_instances(fg: np.ndarray, model: TableModel, scene: Scene) -> Tuple[
     return _split_disconnected(labels), gradient_norm
 
 
-# =================================================================================================
-# bricks
-# =================================================================================================
+# --- bricks ---------------------------------------------------------------------------------------
 
 
 def _colour_name(rgb: Sequence[float]) -> str:
@@ -1210,9 +1144,9 @@ def _shrink_for_view_tilt(
 ) -> Tuple[float, float]:
     """Remove the side walls a tilted view adds to a silhouette.
 
-    A camera that is not directly overhead sees a brick's near wall as well as its top face, so the
-    silhouette projected onto the top-face plane is longer than the brick by ``height * tan(tilt)``
-    along the camera's azimuth. A rectangle axis only picks up the component of that along itself.
+    A camera off the vertical sees a brick's near wall as well as its top face, so the silhouette is
+    longer than the brick by ``height * tan(tilt)`` along the camera's azimuth. Each rectangle axis picks
+    up only the component along itself.
     """
     horizontal = view_direction[:2]
     horizontal_norm = float(np.linalg.norm(horizontal))
@@ -1238,9 +1172,8 @@ def _brick_confidence(brick: Brick) -> Tuple[float, str]:
         }
         return float(sum(DEPTH_CONFIDENCE_WEIGHTS[k] * v for k, v in cues.items())), "depth"
 
-    # No usable depth on this region, so this is exactly pile_perception.py's RGB-only judgement:
-    # how far off the table's colour it is, how much of a step rather than a fade its outline is, and
-    # whether the wood's grain runs through it (a stain) or stops at its edge (a moulded surface).
+    # No usable depth here, so this is pile_perception.py's RGB-only judgement: colour distance from
+    # the table, how much of a step its outline is, and whether the grain runs through it.
     cues = {
         "deviation": deviation,
         "edge_support": float(np.clip(brick.edge_support / CONFIDENCE_EDGE_SUPPORT, 0.0, 1.0)),
@@ -1254,9 +1187,8 @@ def measure_footprint(
 ) -> Optional[Tuple[np.ndarray, Tuple[float, float], float, float, float, float]]:
     """The region's outline in metres, projected onto the plane of its own top face.
 
-    Returns ``(polygon, centre, width_m, length_m, long_axis_heading, area_m2)`` or ``None`` when the
-    outline does not cross the plane at all -- which means the region is not on the table and there is
-    nothing sensible to report about it.
+    Returns ``(polygon, centre, width_m, length_m, long_axis_heading, area_m2)``, or ``None`` when the
+    outline does not cross the plane -- meaning the region is not on the table.
     """
     a, b, c = scene.plane
     projected = project_pixels_onto_plane(
@@ -1266,9 +1198,8 @@ def measure_footprint(
         return None
 
     polygon = projected[:, :2].astype(np.float64)
-    # The rectangle is fitted in millimetres, not metres. cv2.minAreaRect works in float32 internally
-    # and a table-frame coordinate is around 0.3 -- fitting a 8 mm side out of numbers that size is
-    # asking for the answer to be quantised by the format rather than by the pixels.
+    # Fitted in millimetres, not metres: cv2.minAreaRect works in float32 and a table-frame coordinate
+    # is around 0.3, so an 8 mm side would be quantised by the format rather than by the pixels.
     polygon_mm = (polygon * 1000.0).astype(np.float32)
     (center_x, center_y), (side_a, side_b), angle_deg = cv2.minAreaRect(polygon_mm)
     center_x, center_y = center_x / 1000.0, center_y / 1000.0
@@ -1330,9 +1261,8 @@ def build_bricks(
         if long_px < 1 or short_px < 1:
             continue
 
-        # The brick's own height, from the pixels the depth stream actually returned inside it. The
-        # median, not the mean: the studs stand 1.6 mm proud over a minority of the top face and a
-        # mean would ride up on them, putting the projection plane above the surface being grasped.
+        # The brick's own height, from the depth pixels inside it. Median, not mean: the studs stand
+        # 1.6 mm proud over a minority of the top face and would ride the plane above the grasped surface.
         interior = cv2.erode(mask, np.ones((erode, erode), np.uint8))
         if interior.sum() < 9:
             interior = mask
@@ -1344,10 +1274,9 @@ def build_bricks(
             spread = float(np.median(np.abs(samples - height_m)))
             measured_height = True
         else:
-            # Not enough depth on this region to say how tall it is. Assuming a standard brick beats
-            # assuming zero: the height sets the plane the outline is projected onto, and at zero the
-            # region is measured on the tabletop -- so its own side walls are counted into its
-            # footprint and it comes out a couple of millimetres too big in every direction.
+            # Not enough depth to say how tall it is. A standard brick beats zero: the height sets the plane
+            # the outline is projected onto, and at zero the region's own side walls are counted into its
+            # footprint and it comes out too big in every direction.
             height_m, spread, measured_height = FALLBACK_BRICK_HEIGHT, 0.0, False
 
         measured = measure_footprint(contour, scene, max(height_m, 0.0))
@@ -1355,13 +1284,12 @@ def build_bricks(
             continue
         polygon, centre, width_m, length_m, heading, area_m2 = measured
 
-        # What stands around it. A ring higher than the brick means something is lying over it, which
-        # is the thing that makes a grasp fail without looking wrong from above.
+        # What stands around it. A ring higher than the brick means something is lying over it -- the thing
+        # that makes a grasp fail without looking wrong from above.
         ring = cv2.dilate(mask, np.ones((outer, outer), np.uint8)) - cv2.dilate(mask, np.ones((inner, inner), np.uint8))
         ring_depth = (ring > 0) & scene.depth_valid
         neighbour_height = float(np.percentile(scene.height[ring_depth], 90)) if ring_depth.any() else 0.0
-        # Measured against bare table only. A brick buried in the pile is ringed by other bricks, whose
-        # tops are as flat as its own, and comparing it to those says nothing about whether it is wood.
+        # Bare table only: a buried brick is ringed by other bricks whose tops are as flat as its own.
         bare_ring = ring * (foreground == 0)
 
         outline = np.zeros_like(mask)
@@ -1410,10 +1338,9 @@ def build_bricks(
         brick.colour_name = _colour_name(brick.colour_rgb)
         brick.confidence, brick.confidence_source = _brick_confidence(brick)
 
-        # Failing the shape tests means the region is not one brick -- but on this much height and
-        # colour evidence it is certainly bricks, so it is kept as an unresolved clump rather than
-        # thrown away. Outlining it says "there is something here the detector could not take apart",
-        # which is the truth, where dropping it would draw bare table over several real bricks.
+        # Failing the shape tests means this is not one brick -- but on this much evidence it is certainly
+        # bricks, so it is kept as an unresolved clump. Outlining it says "something here could not be taken
+        # apart", where dropping it would draw bare table over several real bricks.
         brick.is_clump = brick.rectangularity < MIN_RECTANGULARITY or brick.solidity < MIN_SOLIDITY
 
         reason = None
@@ -1445,20 +1372,16 @@ def build_bricks(
     return kept, rejected
 
 
-# =================================================================================================
-# clearance, on a top-down map of the table
-# =================================================================================================
+# --- clearance, on a top-down map of the table ----------------------------------------------------
 
 
 @dataclass
 class TopDownMap:
     """An orthographic millimetre raster of the tabletop, so distances come out in millimetres.
 
-    Measuring clearance in image pixels and multiplying by a single millimetres-per-pixel is wrong by
-    however much the perspective varies across the frame -- with the camera 40 cm up and the pile
-    20 cm across, that is several percent between the near and far edge of the pile, on the one number
-    (fingertip room) that decides whether the grasp collides. An orthographic raster has no such
-    gradient: one cell is one millimetre everywhere.
+    Measuring clearance in image pixels and scaling by one millimetres-per-pixel is wrong by however much
+    the perspective varies across the frame -- several percent across the pile, on the one number
+    (fingertip room) that decides whether the grasp collides. One cell here is one millimetre everywhere.
     """
 
     origin: np.ndarray  # base-frame x, y of cell (0, 0)
@@ -1532,26 +1455,18 @@ def measure_clearance(bricks: List[Brick], table_map: Optional[TopDownMap]) -> N
         brick.exposed_ratio = float(np.mean(free[rows, columns] > EXPOSED_FREE_MM))
 
 
-# =================================================================================================
-# ranking
-# =================================================================================================
+# --- ranking --------------------------------------------------------------------------------------
 
 
 def rank_bricks(bricks: List[Brick]) -> List[Brick]:
     """Order the bricks by how safely a top-down parallel-jaw grasp would work on each.
 
-    The terms are the same ones ``pile_perception.py`` scores on, with one swap: where the RGB-only
-    version *infers* that a clean, isolated rectangle is a brick nothing is lying on top of, the height
-    map says so outright. ``top_of_pile`` is one minus how far the ring around the brick stands above
-    it -- a brick with bare table or shorter bricks beside it scores 1, a brick with a 6 mm-taller
-    neighbour leaning over it scores 0.
+    The same terms ``pile_perception.py`` scores on, with one swap: where it *infers* that a clean
+    isolated rectangle has nothing on top, the height map says so outright (``top_of_pile``).
 
-    ``grip_depth`` is the second thing depth buys, and it is not in the RGB-only version at all
-    because a single photograph cannot measure it: how much of the part's side wall the fingertips can
-    reach past before the table stops them. Every other term rates a plate lying alone on bare table
-    as the best grasp in the pile, and every one of them is right -- it is isolated, exposed, clean
-    and the right width. It is also 3.2 mm tall, which leaves the pads under two millimetres of purchase
-    and turns the close into a shove.
+    ``grip_depth`` is the second thing depth buys: how much side wall the fingertips reach past before the
+    table stops them. Every other term rates a plate alone on bare table as the best grasp in the pile,
+    and is right -- but it is 3.2 mm tall, which turns the close into a shove.
     """
     for brick in bricks:
         clearance = float(
@@ -1606,19 +1521,11 @@ def assign_priorities(
 ) -> None:
     """Number the bricks the arm should actually be sent at, best first.
 
-    Three ways a well-scored brick still does not get a number:
-
-    * the detector is not confident it is a brick -- an unconfident region is most likely a mark in the
-      wood, and the cost of closing the gripper on bare table is a wasted cycle plus a fingertip into
-      the board;
-    * its geometry is not a grasp (too wide for the jaws, too small to be a part, an unresolved clump,
-      or no room for a fingertip beside it);
-    * the arm cannot reach a straight-down pregrasp above it, which is a real and common outcome at
-      the far corner of the table and is far better found here than after the arm has committed.
-
-    The reachability test is eight IK calls over the network per brick, so the search gives up after
-    :data:`MAX_REACHABILITY_CHECKS` candidates: if that many of the best-scoring bricks in a row are
-    all out of reach, the pile is in the wrong place and no amount of further searching fixes it.
+    Three ways a well-scored brick still gets no number: the detector is not confident it is a brick, its
+    geometry is not a grasp (too wide, too small, an unresolved clump, no fingertip room), or the arm
+    cannot reach a straight-down pregrasp above it. Reachability is eight IK calls per brick, so the
+    search gives up after :data:`MAX_REACHABILITY_CHECKS` -- that many unreachable best-scorers in a row
+    means the pile is in the wrong place.
     """
     rank = 0
     checked = 0
@@ -1651,9 +1558,224 @@ def assign_priorities(
         brick.priority = rank
 
 
-# =================================================================================================
-# the pipeline
-# =================================================================================================
+# --- the pipeline ---------------------------------------------------------------------------------
+
+
+def plane_normal(plane: Sequence[float]) -> np.ndarray:
+    normal = np.array([-plane[0], -plane[1], 1.0])
+    return normal / np.linalg.norm(normal)
+
+
+def angle_between(first: Sequence[float], second: Sequence[float]) -> float:
+    """Angle between two planes, in degrees.
+
+    The angle between their *normals*, not the difference of their tilts: two planes can lean by the
+    same amount in opposite directions, which is zero by tilt and twice the tilt in fact.
+    """
+    return float(np.degrees(np.arccos(np.clip(float(plane_normal(first) @ plane_normal(second)), -1.0, 1.0))))
+
+
+def fit_plane_to_depth(
+    scene: Scene, iterations: int = 6, inlier_mm: float = 3.0
+) -> Optional[Tuple[Tuple[float, float, float], float, int]]:
+    """Fit ``z = a*x + b*y + c`` to the depth points the *camera* thinks are the tabletop.
+
+    Seeded from the lowest two fifths of the height readings and re-fitted a few times, keeping what
+    lands within ``inlier_mm`` of the current plane. The tabletop is the widest flat thing in the frame,
+    so this converges on it even with the pile in the middle -- but only if it really is the widest,
+    which is what the returned inlier count is for.
+
+    This is the *camera's* idea of the table, in the camera's own frame of reference, and it is not
+    interchangeable with the touched-off plane: where the two disagree by a constant offset, this one
+    is still the right datum for deciding which pixels stand above the table, and the touched-off one
+    is still the only trustworthy answer for how high the fingertips must stop.
+
+    Returns the plane, its RMS residual in metres, and how many pixels it was fitted to; ``None`` when
+    there is not enough depth over the reachable frame to fit anything.
+    """
+    usable = scene.reach_mask & scene.depth_valid
+    if usable.sum() < 500:
+        return None
+
+    x = scene.table_xy[..., 0][usable].astype(np.float64)
+    y = scene.table_xy[..., 1][usable].astype(np.float64)
+    a, b, c = scene.plane
+    z = a * x + b * y + c + scene.height[usable].astype(np.float64)
+
+    design = np.column_stack([x, y, np.ones_like(x)])
+    inliers = scene.height[usable] <= np.percentile(scene.height[usable], 40.0)
+    plane = np.asarray(scene.plane, float)
+    for _ in range(iterations):
+        if inliers.sum() < 100:
+            return None
+        plane, *_ = np.linalg.lstsq(design[inliers], z[inliers], rcond=None)
+        residual = z - design @ plane
+        inliers = np.abs(residual) < inlier_mm / 1000.0
+    rms = float(np.sqrt(np.mean((z[inliers] - design[inliers] @ plane) ** 2)))
+    return (float(plane[0]), float(plane[1]), float(plane[2])), rms, int(inliers.sum())
+
+
+#: Bin width for finding the surface the bricks rest on, in metres.
+SUPPORT_MODE_BIN_M = 0.001
+#: Depth within this of the modal height seeds the support-plane fit. Wider than a plate is thick
+#: would swallow the bricks into the table; much narrower and depth noise alone empties the seed.
+SUPPORT_INLIER_M = 0.003
+#: A surface covering less of the usable frame than this is a patch, not a tabletop.
+MIN_SUPPORT_FRACTION = 0.15
+#: A rival surface at least this big is worth naming: on a board standing on another table, it is
+#: that other table, and picking the wrong one of the two puts the whole board 'above' the datum.
+RIVAL_SURFACE_FRACTION = 0.10
+#: ...and its heights have to be this concentrated, or it is the pile rather than a surface.
+RIVAL_CONCENTRATION = 0.55
+#: The support plane has to be parallel to the touched-off one within this, or the fit found a wall,
+#: the side of the pile, or the wrong surface entirely.
+MAX_SUPPORT_TILT_DEG = 3.0
+#: ...and flat to this.
+MAX_SUPPORT_RMS_M = 0.004
+
+
+def fit_support_plane(
+    scene: Scene, iterations: int = 4
+) -> Optional[Tuple[Tuple[float, float, float], float, int, List[Tuple[float, float]]]]:
+    """The surface the bricks are resting on: the *dominant* flat surface, not the lowest one.
+
+    Taking the lowest surface is wrong whenever the working table is not the only one in frame. A
+    wooden board standing on a larger table is exactly that case: the board is what the bricks sit on
+    and what was touched off, but the darker table around it is lower, so a lowest-first fit locks
+    onto it and then reports the whole board -- and everything on it -- as standing proud of the
+    table. Every wood pixel becomes a brick, the colour model has no bare table to seed from, and the
+    regions that come out of it are wood.
+
+    So the surface is chosen by *mass* instead: heights are binned, the fullest bin wins, and the plane
+    is fitted to the depth within :data:`SUPPORT_INLIER_M` of it and re-fitted a few times. The bricks
+    cannot outvote the surface they lie on -- they are small in area and only millimetres above it --
+    and a second table only wins if it fills more of the frame than the board does, which is what the
+    returned rival list is for.
+
+    Returns ``(plane, rms, inliers, rivals)`` where ``rivals`` is ``(offset_from_the_chosen_plane,
+    fraction_of_frame)`` for every other surface big enough to name; ``None`` when there is not enough
+    depth to fit anything.
+    """
+    usable = scene.reach_mask & scene.depth_valid
+    total = int(usable.sum())
+    if total < 500:
+        return None
+
+    heights = scene.height[usable].astype(np.float64)
+    x = scene.table_xy[..., 0][usable].astype(np.float64)
+    y = scene.table_xy[..., 1][usable].astype(np.float64)
+    a, b, c = scene.plane
+    z = a * x + b * y + c + heights
+
+    edges = np.arange(SCENE_FLOOR_M, SCENE_CEILING_M + SUPPORT_MODE_BIN_M, SUPPORT_MODE_BIN_M)
+    counts, _ = np.histogram(heights, bins=edges)
+    # Smoothed over about a plate's thickness, so a surface split across neighbouring bins by depth
+    # noise is not beaten by a narrower spike inside the pile.
+    smoothed = np.convolve(counts.astype(float), np.ones(3) / 3.0, mode="same")
+    mode_height = float(edges[int(smoothed.argmax())] + SUPPORT_MODE_BIN_M / 2)
+
+    design = np.column_stack([x, y, np.ones_like(x)])
+    inliers = np.abs(heights - mode_height) < SUPPORT_INLIER_M
+    plane = np.asarray(scene.plane, float)
+    for _ in range(iterations):
+        if inliers.sum() < 100:
+            return None
+        plane, *_ = np.linalg.lstsq(design[inliers], z[inliers], rcond=None)
+        inliers = np.abs(z - design @ plane) < SUPPORT_INLIER_M
+    if inliers.sum() < 100:
+        return None
+    rms = float(np.sqrt(np.mean((z[inliers] - design[inliers] @ plane) ** 2)))
+
+    # Anything else flat and sizeable, measured from the plane just fitted.
+    residual = z - design @ plane
+    # Binned, then adjacent bins merged: one physical surface straddles several bins once depth noise
+    # is added to it, and reporting it three times reads as three tables.
+    rival_counts, rival_edges = np.histogram(residual, bins=np.arange(-0.15, 0.15, SUPPORT_MODE_BIN_M))
+    window = int(round(2 * SUPPORT_INLIER_M / SUPPORT_MODE_BIN_M)) | 1
+    pooled = np.convolve(rival_counts.astype(float), np.ones(window), mode="same")
+    # A tabletop's heights are tight; a jumbled pile's are not. Comparing the mass in a narrow window
+    # against a window three times wider separates the two without needing a second plane fit, so the
+    # pile does not get announced as a surface every run.
+    spread = np.convolve(rival_counts.astype(float), np.ones(3 * window), mode="same")
+    rivals: List[Tuple[float, float]] = []
+    claimed = np.zeros(len(pooled), bool)
+    for index in np.argsort(pooled)[::-1]:
+        offset = float(rival_edges[index] + SUPPORT_MODE_BIN_M / 2)
+        concentration = pooled[index] / spread[index] if spread[index] > 0 else 0.0
+        if abs(offset) <= SUPPORT_INLIER_M or claimed[index] or pooled[index] / total < RIVAL_SURFACE_FRACTION:
+            continue
+        if concentration < RIVAL_CONCENTRATION:
+            continue
+        rivals.append((offset, float(pooled[index]) / total))
+        claimed[max(0, index - window) : index + window + 1] = True
+    return (float(plane[0]), float(plane[1]), float(plane[2])), rms, int(inliers.sum()), rivals
+
+
+def resolve_segmentation_plane(
+    view: PileView, touched_plane: Tuple[float, float, float], robot_type: str
+) -> Tuple[Tuple[float, float, float], str]:
+    """The datum to measure brick *heights* against -- the camera's own support surface where it can
+    be found, the touched-off plane where it cannot.
+
+    Two planes, two jobs, and they are not interchangeable. "Does this pixel stand above the table" is
+    a question about the camera's own reconstruction, and it is answered correctly even when that
+    reconstruction sits at the wrong absolute height, as long as it is internally flat. "How high must
+    the fingertips stop" is a question about the world, and only the touched-off plane answers it.
+
+    Using the touched-off plane for the first job is what makes 99% of a frame read as brick when the
+    two calibrations disagree by a constant offset: there is no bare table left anywhere, the colour
+    model has nothing to seed from, and the regions reported are wood.
+    """
+    touched = tuple(float(v) for v in touched_plane)
+    scene = build_scene(view, touched, robot_type)
+    fitted = fit_support_plane(scene)
+    if fitted is None:
+        logger.warning(
+            f"{view.name}: not enough depth over the reachable frame to find the surface the bricks are "
+            "resting on; measuring heights against the touched-off plane instead."
+        )
+        return touched, "touched-off (no depth fit)"
+
+    plane, rms, inliers, rivals = fitted
+    tilt = angle_between(plane, touched)
+    usable = int((scene.reach_mask & scene.depth_valid).sum())
+    if inliers / max(usable, 1) < MIN_SUPPORT_FRACTION:
+        logger.warning(
+            f"{view.name}: the flattest surface found covers only {100 * inliers / max(usable, 1):.0f}% of the "
+            f"frame (want {MIN_SUPPORT_FRACTION * 100:.0f}%), so it is a patch and not the tabletop. Using the "
+            "touched-off plane."
+        )
+        return touched, "touched-off (support surface too small)"
+    if rms > MAX_SUPPORT_RMS_M:
+        logger.warning(
+            f"{view.name}: the support surface is only flat to {rms * 1000:.1f} mm (limit "
+            f"{MAX_SUPPORT_RMS_M * 1000:.0f} mm), so it is not a tabletop. Using the touched-off plane."
+        )
+        return touched, "touched-off (support surface not flat)"
+    if tilt > MAX_SUPPORT_TILT_DEG:
+        logger.warning(
+            f"{view.name}: the support surface leans {tilt:.2f} deg from the touched-off plane (limit "
+            f"{MAX_SUPPORT_TILT_DEG:.0f} deg), so it is not the same surface. Using the touched-off plane."
+        )
+        return touched, "touched-off (support surface not parallel)"
+
+    centre = np.asarray(view.X_base_camera, float)[:3, 3]
+    offset = (plane[2] + plane[0] * centre[0] + plane[1] * centre[1]) - (
+        touched[2] + touched[0] * centre[0] + touched[1] * centre[1]
+    )
+    logger.info(
+        f"{view.name}: bricks are resting on a surface fitted to {inliers} px "
+        f"({100 * inliers / max(usable, 1):.0f}% of the frame), flat to {rms * 1000:.2f} mm, {tilt:.2f} deg "
+        f"from the touched-off plane and {offset * 1000:+.1f} mm from it. Heights are measured against this; "
+        "the grasp height still comes from the touched-off plane."
+    )
+    for rival_offset, fraction in rivals:
+        logger.info(
+            f"{view.name}: a second flat surface {rival_offset * 1000:+.0f} mm from the one the bricks are on "
+            f"covers {fraction * 100:.0f}% of the frame -- the table the board is standing on, most likely. It "
+            "is not the datum; if it should have been, the viewpoints are seeing more of it than of the board."
+        )
+    return plane, f"camera support surface ({offset * 1000:+.0f} mm from touched)"
 
 
 def analyse_pile(view: PileView, plane: Tuple[float, float, float], robot_type: str) -> PileAnalysis:
@@ -1680,9 +1802,7 @@ def analyse_pile(view: PileView, plane: Tuple[float, float, float], robot_type: 
     )
 
 
-# =================================================================================================
-# the handoff to submodule_1
-# =================================================================================================
+# --- the handoff to submodule_1 -------------------------------------------------------------------
 
 
 def _target_record(brick: Brick) -> Dict:
@@ -1797,9 +1917,8 @@ def write_pile_target(path: str, manifest: Dict) -> None:
 def read_pile_target(path: str = PILE_TARGET_PATH, max_age: float = PILE_TARGET_MAX_AGE) -> Optional[Dict]:
     """Load submodule_3's chosen brick, or ``None`` with a reason logged if it should not be trusted.
 
-    Two ways it is refused, both meaning "this describes a pile that is no longer on the table": the
-    file is missing, or it is older than ``max_age``. Every pick disturbs the pile, so an old target is
-    not merely stale -- the brick it names has very likely moved or been buried by the last grasp.
+    Refused if missing or older than ``max_age``. Every pick disturbs the pile, so an old target is not
+    merely stale -- the brick it names has likely moved or been buried.
     """
     if not os.path.exists(path):
         logger.warning(f"No pile target at {path}; run submodule_3 first.")
@@ -1824,19 +1943,15 @@ def read_pile_target(path: str = PILE_TARGET_PATH, max_age: float = PILE_TARGET_
     return payload
 
 
-# =================================================================================================
-# output for the eyes
-# =================================================================================================
+# --- output for the eyes --------------------------------------------------------------------------
 
 OUTLINE_COLOUR = (80, 235, 90)
 PRIORITY_COLOURS = [(60, 60, 245), (0, 150, 255), (0, 215, 255), (190, 220, 60), (230, 160, 60)]
 
 
 def render_overlay(analysis: PileAnalysis) -> np.ndarray:
-    """The frame with every brick outlined and the ones to grasp numbered 1..5.
-
-    Drawn at working resolution, which is what every measurement was made at -- an overlay that has
-    been resampled back to the source frame no longer shows exactly the pixels that were judged.
+    """The frame with every brick outlined and the ones to grasp numbered 1..5. Drawn at working resolution,
+    which is what every measurement was made at.
     """
     out = analysis.scene.bgr.copy()
     for brick in analysis.bricks:
@@ -1952,18 +2067,15 @@ def report(analysis: PileAnalysis) -> None:
         )
 
 
-# =================================================================================================
-# CLI
-# =================================================================================================
+# --- CLI ------------------------------------------------------------------------------------------
 
 
 def resolve_table_plane(table_z: Optional[float]) -> Tuple[float, float, float]:
-    """The tabletop as ``z = a*x + b*y + c``, best source first.
+    """    carries no hand-eye calibration error -- and every height in this module is measured from it
+    The tabletop as ``z = a*x + b*y + c``, best source first.
 
-    The touched-off plane wins: the arm measured it by touching, so unlike anything the camera says it
-    carries no hand-eye calibration error -- and every height in this module is measured from it, so an
-    error here is an error in every brick at once. ``--table-z`` overrides it with a level plane (the
-    tilt is lost), and ``config.TABLE_Z`` is the last resort.
+    The touched-off plane wins: measured by touching, so it carries no hand-eye error, and every height
+    here is measured from it. ``--table-z`` overrides it with a level plane; ``config.TABLE_Z`` is last.
     """
     if table_z is not None:
         logger.info(f"--table-z {table_z:+.4f} m given; using a level plane at that height.")
@@ -2113,9 +2225,8 @@ def main(
     with connect_arm(robot_type, ip_address, port) as arm, open_camera(
         CAMERA_RESOLUTIONS[camera_resolution]
     ) as camera:
-        # The reachability checks below go through getInverseKinematics, which reports every pose as
-        # unreachable while the UR control script is stopped -- and a previous run's long pause is
-        # exactly how it gets stopped.
+        # getInverseKinematics reports every pose as unreachable while the UR control script is stopped,
+        # and a previous run's long pause is exactly how it gets stopped.
         ensure_control_ready(arm)
 
         joint_configuration = None

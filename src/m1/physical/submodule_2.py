@@ -1,29 +1,24 @@
 """m1 submodule 2 (physical): from the pregrasp, close on the brick and lift it off the table.
 
-The counterpart of :mod:`m1.simulation.submodule_2`, doing the same six things in the same order and
-checking the same things between them: open, descend, close, verify, lift, verify again. It takes the
-:class:`~m1.physical.submodule_1.GraspTarget` submodule_1 produced, rather than reading a pose off the
-arm and a JSON file off the disk -- the two halves run in one process now. The command line at the
-bottom rebuilds a target from the handoff file so the old two-terminal workflow still works.
+Counterpart of :mod:`m1.simulation.submodule_2`: open, descend, close, verify, lift, verify again.
+It takes submodule_1's :class:`~m1.physical.submodule_1.GraspTarget` directly; the CLI at the bottom
+rebuilds one from the handoff file so the old two-terminal workflow still works.
 
-Two of those steps carry the whole module.
+**Where the position comes from.** submodule_1 picks the brick and stands over it from viewpoints
+across the table, where its lateral error is at its worst. Rather than inherit that, this module
+re-measures the brick from the pregrasp before planning anything
+(:func:`relocate_from_pregrasp`), through the *same* colour pipeline the survey uses -- one perception,
+called from both halves. The tool is vertical at the pregrasp, which zeroes both the
+``height x tan(tilt)`` lever arm and the lateral part of a hand-eye translation error, so this look is
+the precise one and the survey's only has to be good enough to find the brick again. The grasp height
+still comes from the touched-off plane: measured by touching, not seen. Pass ``relook=False`` to
+descend on the survey's position instead.
 
-**How far to descend.** The fingertips have to get low enough down the brick's side wall to have
-something to pinch, and must not touch the table. On a 9.6 mm brick that is a wide target; on a 3.2 mm
-plate the entire budget is three millimetres, and a descent sized for the brick would drive the pads
-into the tabletop -- which on a real robot jams the fingers and trips a protective stop. So the descent
-is capped by the part being grasped and by the table underneath it, and the tighter cap wins. Where
-the simulation knows the table exactly, here it comes from the touched-off plane, and every millimetre
-of margin the simulation does not need is margin this module has to leave.
-
-**Whether it worked.** The gripper is commanded to a *position* slightly inside the brick's width, so
-the fingers stall on the brick rather than meeting each other. Two independent signals then say
-whether anything is held -- the Robotiq's own object-detection flag, read off motor current, and the
-gap between the width commanded and the width reached -- because either alone lies: the flag also
-fires when the fingers stall against each other, and the width alone cannot tell a held brick from one
-wedged between a pad and a neighbour. Checked twice: on closing, which catches a miss, and again after
-the lift and a pause, which catches the brick sliding out as the arm accelerates. The second check is
-the one that means anything, and it is the whole point of the module.
+Two steps carry the module. **How far to descend** is capped both by the part's own height and by the
+table under it, tighter cap winning -- on a 3.2 mm plate a descent sized for the brick would drive the
+pads into the tabletop. **Whether it worked** is checked from two signals, the Robotiq's
+object-detection flag and the gap between commanded and reached width, twice: on closing, and again
+after the lift and a pause. The second check is the one that means anything.
 """
 
 from __future__ import annotations
@@ -45,37 +40,197 @@ _SRC_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file_
 if _SRC_DIR not in sys.path:
     sys.path.insert(0, _SRC_DIR)
 from m1.physical import cell as C  # noqa: E402
-from m1.physical.submodule_1 import GraspTarget  # noqa: E402
+from m1.physical import submodule_1  # noqa: E402
+from m1.physical.submodule_1 import GRIPPER_APPROACH_MARGIN_M, GraspTarget  # noqa: E402
 
-# --- the descent ------------------------------------------------------------------------------------
-#: How far below the brick's top face the fingertips are driven before closing. Roughly a third of a
-#: brick puts the pads on the side walls rather than on the studs, which would slip.
+# --- the descent ----------------------------------------------------------------------------------
+#: How far below the top face the fingertips go before closing -- about a third of a brick, so the pads
+#: land on the side walls rather than the studs.
 GRASP_DEPTH_M = 0.003
-#: Hard floor: the fingertips never come closer than this to the tabletop, whatever else is asked for.
+#: Hard floor on fingertip-to-tabletop distance, whatever else is asked for.
 MIN_FINGERTIP_CLEARANCE_M = 0.0015
 
-# --- the gripper ------------------------------------------------------------------------------------
-#: Commanded *below* the brick's width, so the position controller keeps pushing and the fingers stall
-#: on the brick. Nothing about a position command alone makes a grip; this overshoot is the grip.
-GRIPPER_SQUEEZE_M = 0.003
-#: Verification band on the width reached. Under the lower bound the pads met with nothing between
-#: them; over the upper bound something much thicker than the brick is in the jaws -- a neighbour
-#: dragged in, or the brick caught end-on.
-WIDTH_TOLERANCE_BELOW_M = 0.004
-WIDTH_TOLERANCE_ABOVE_M = 0.006
+# --- the gripper ----------------------------------------------------------------------------------
+#: The jaws are commanded shut, not to a width derived from the brick.
+#:
+#: Sizing the close from the measured width made the grasp only as good as that measurement, and it is
+#: the weakest number in the pipeline: a colour footprint that reads a couple of millimetres wide leaves
+#: the fingers reaching their commanded opening without ever touching the brick, which reports as "no
+#: object" on a grasp that was never attempted. Commanding the jaws fully shut removes the measurement
+#: from the loop entirely -- whatever stops the fingers is the brick, and the width they stop at is the
+#: measurement rather than the test. The force limit, not the position target, is what protects the part.
+CLOSE_FULLY = True
+#: Finger travel above the fully-closed opening that counts as something being held. Above the ~0.4 mm
+#: register quantisation and well under the thinnest part, so a plate on edge still registers.
+HELD_MIN_OPENING_M = 0.0015
 
-# --- the lift ---------------------------------------------------------------------------------------
+# --- the lift -------------------------------------------------------------------------------------
 LIFT_HEIGHT_M = 0.12
 MIN_LIFT_HEIGHT_M = 0.04
 LIFT_SEARCH_STEP_M = 0.01
 SETTLE_DURATION = 1.0  # after the lift, so a slipping grasp has time to show itself
 
-#: Somewhere on the table well clear of the pile to put a brick down. Sorting bricks into categories is
-#: Module 3's job; this exists so the cycle can be run more than once without the next look at the pile
-#: finding the last brick still in the gripper. **Measure this on your own bench**, and keep it well
-#: away from ``cell.PILE_CENTER`` -- submodule_1's keep-out is what stops the robot re-picking its own
-#: output, and it is drawn around this point.
+#: Where to put a brick down, clear of the pile, so the cycle can run more than once. Measure on your
+#: own bench and keep it well away from ``cell.PILE_CENTER`` -- submodule_1's keep-out is drawn around
+#: this point and is what stops the robot re-picking its own output.
 DROP_POSITION = np.array([0.16, -0.20, 0.06])
+
+
+# --- the re-look from the pregrasp -----------------------------------------------------------------
+#: Re-measure the brick from the pregrasp before descending, instead of trusting the survey's position.
+#: The survey sees the pile from across the table, 20-30 deg off vertical, where a height error slides
+#: the answer sideways by ``height error x tan(tilt)``. From the pregrasp the tool points straight down,
+#: which zeroes that lever arm -- and also zeroes the lateral part of a hand-eye translation error,
+#: since that error is fixed in the tool frame and the tool axis is now vertical. What is left of it is
+#: pure height, and height is the one thing here that does not come from the camera at all.
+RELOOK_FROM_PREGRASP = True
+#: How far from the survey's position a region may be and still be taken for the same brick. It has to
+#: be wider than the correction it exists to make; the size check below is what stops it locking onto a
+#: neighbour instead.
+RELOOK_MATCH_TOLERANCE_M = 0.025
+#: ...and it has to be about the same size, which is what catches a neighbour inside that radius.
+RELOOK_WIDTH_TOLERANCE_M = 0.006
+#: Above this correction the pregrasp is re-flown over the new position, so the descent stays a pure
+#: vertical drop rather than sliding sideways through whatever is beside the brick.
+RELOOK_REPOSITION_M = 0.002
+#: Above this the correction is wider than the jaws' slack: the survey would have missed outright.
+RELOOK_WARN_M = 0.010
+#: Board coverage below which the frame has too little bare table for the colour model to fit to.
+RELOOK_MIN_BOARD_FRACTION = 0.20
+#: ...and the camera height above the brick's top face to rise to and retry from. The camera sits about
+#: 18 cm behind the fingertips, so a 3 cm pregrasp puts it 21 cm up -- at a D435's minimum range, where
+#: patches of the frame come back empty. 26 cm is inside the band submodule_1's nadir look uses.
+RELOOK_RETRY_CAMERA_HEIGHT_M = 0.26
+
+def _look_at_brick(cell: C.Cell, target: GraspTarget) -> Optional[submodule_1.ViewResult]:
+    """A colour look at the brick from above, rising off the pregrasp only if it is too close to see it.
+
+    Depth coverage used to be the test for whether the frame was usable, which no longer applies: the
+    colour pipeline needs no depth at all. What it does need is the *board* in frame, because the table
+    model is fitted to it -- and at a 3 cm pregrasp the camera is only ~21 cm up, where the frame may be
+    filled by the pile with no bare wood to fit to.
+    """
+    result = submodule_1.analyse_view(cell, cell.capture("pregrasp re-look"), "pregrasp")
+    board_fraction = float(result.analysis["board"].area_px) / max(result.analysis["fg"].size, 1)
+    if board_fraction >= RELOOK_MIN_BOARD_FRACTION:
+        return result
+
+    logger.info(
+        f"Only {board_fraction * 100:.0f}% of the pregrasp frame is board (want "
+        f"{RELOOK_MIN_BOARD_FRACTION * 100:.0f}%); the camera is too close to see the table it fits its "
+        "colour model to. Rising to look again."
+    )
+    eye_z = target.top_face_z + RELOOK_RETRY_CAMERA_HEIGHT_M
+    pose = C.look_at_tool_pose(cell, [target.position[0], target.position[1], eye_z], target.position)
+    q = C.solve_tool_ik(cell, pose)
+    if q is None:
+        logger.warning("No reachable pose to rise to; keeping the close frame such as it is.")
+        return result
+    cell.move_arm_to(q)
+    cell.advance(0.3)
+    return submodule_1.analyse_view(cell, cell.capture("pregrasp re-look (risen)"), "pregrasp")
+
+
+def relocate_from_pregrasp(cell: C.Cell, target: GraspTarget) -> GraspTarget:
+    """Re-measure the brick from where the arm is standing and move ``target`` onto it, in place.
+
+    The same colour pipeline the survey uses, run from straight above instead of from across the table.
+    That is the whole point: the survey sees the pile 20-30 deg off vertical, where the assumed height
+    slides the answer sideways by ``height error x tan(tilt)``, and a hand-eye translation error --
+    fixed in the tool frame -- lands mostly sideways too. With the tool vertical both of those go to
+    zero, so this look is the precise one and the survey's is only good enough to find the brick again.
+
+    Best-effort throughout: a look that finds nothing, or finds something the wrong size, keeps the
+    survey's position and says why. The grasp height stays ``cell.table_plane`` -- touched, not seen --
+    plus the height measured here.
+    """
+    original = np.array(target.position[:2], float)
+    result = _look_at_brick(cell, target)
+    if result is None:
+        return target
+
+    measured = submodule_1.project_all(result, cell.table_plane)
+    candidates = [
+        (float(np.linalg.norm(measured[region.index][0] - original)), region)
+        for region in result.bricks
+        if region.index in measured
+    ]
+    within = [(d, r) for d, r in candidates if d <= RELOOK_MATCH_TOLERANCE_M]
+    if not within:
+        nearest = min(candidates, key=lambda item: item[0])[0] if candidates else float("inf")
+        logger.warning(
+            f"The re-look found nothing within {RELOOK_MATCH_TOLERANCE_M * 1000:.0f} mm of the pregrasp "
+            f"(nearest region {nearest * 1000:.0f} mm away, {len(result.bricks)} found). Descending on the "
+            "survey's position."
+        )
+        return target
+
+    distance, region = min(within, key=lambda item: item[0])
+    centre, width, length, heading, height, part = measured[region.index]
+    if abs(width - target.width) > RELOOK_WIDTH_TOLERANCE_M:
+        logger.warning(
+            f"The region {distance * 1000:.0f} mm away is {width * 1000:.1f} mm wide where the survey measured "
+            f"{target.width * 1000:.1f} mm -- a different part, not this one seen closer. Descending on the "
+            "survey's position."
+        )
+        return target
+
+    x, y = float(centre[0]), float(centre[1])
+    table_z = cell.table_z_at(x, y)  # touched-off: the only trustworthy absolute height
+    correction = float(np.linalg.norm(np.array([x, y]) - original))
+
+    target.position = np.array([x, y, table_z + height])
+    target.table_z = table_z
+    target.width, target.length, target.height = width, length, height
+    target.long_axis_heading = heading
+    target.height_measured = part is not None
+    target.nadir_correction = correction
+    target.position_source = "colour/pregrasp_relook"
+    target.per_view["pregrasp"] = np.array([x, y])
+    target.approach_width = min(width + GRIPPER_APPROACH_MARGIN_M, cell.gripper_calibration.max_width)
+
+    logger.success(
+        f"Re-look from the pregrasp: the brick is at ({x:.4f}, {y:.4f}) m, {correction * 1000:.1f} mm from "
+        f"where the survey put it; {width * 1000:.1f} x {length * 1000:.1f} mm, top face "
+        f"z={table_z + height:+.4f} m ({height * 1000:.1f} mm over the touched-off table)."
+    )
+    if correction > RELOOK_WARN_M:
+        logger.warning(
+            f"A {correction * 1000:.0f} mm correction is wider than the jaws' slack, so the survey's position "
+            "would have missed this brick. The grasp uses the corrected one."
+        )
+    if not target.height_measured:
+        logger.warning(
+            f"The footprint matched no catalog part, so the height is still the {height * 1000:.1f} mm fallback "
+            "-- but from straight above that costs almost nothing sideways, which is the point of looking again."
+        )
+    return target
+
+
+def reposition_over(cell: C.Cell, target: GraspTarget) -> None:
+    """Re-fly the pregrasp over the corrected position, so the descent is a pure vertical drop.
+
+    Without this the corrected grasp is reached by a slanted linear move from the old pregrasp, which
+    walks the open fingers sideways through whatever is next to the brick on the way in.
+    """
+    if target.pregrasp_pose is None:
+        return
+    correction = float(target.nadir_correction or 0.0)
+    if correction <= RELOOK_REPOSITION_M:
+        return
+    above = np.array([target.position[0], target.position[1], float(target.pregrasp_pose[2, 3])])
+    solved = C.solve_top_down_ik(cell, above, target.closing_heading, target.approach_width)
+    if solved is None:
+        logger.warning(
+            f"Cannot re-fly the pregrasp {correction * 1000:.1f} mm across to the corrected position; the "
+            "descent will slant instead. Watch the neighbours."
+        )
+        return
+    pose, q, _ = solved
+    logger.info(f"Shifting the pregrasp {correction * 1000:.1f} mm onto the corrected position.")
+    cell.move_tcp_to(pose, linear=True)
+    target.pregrasp_pose = pose
+    target.pregrasp_configuration = cell.arm_positions()
 
 
 @dataclass
@@ -93,30 +248,44 @@ class GraspResult:
 
     def describe(self) -> str:
         verdict = "grasped and holding" if self.success else "FAILED"
+        commanded = (
+            "shut" if self.commanded_width <= 1e-6 else f"to {self.commanded_width * 1000:.1f} mm"
+        )
         return (
-            f"{verdict}: {self.reason}. Descended {self.grasp_depth * 1000:.1f} mm, commanded "
-            f"{self.commanded_width * 1000:.1f} mm, pads stopped at {self.width_at_close * 1000:.1f} mm "
+            f"{verdict}: {self.reason}. Descended {self.grasp_depth * 1000:.1f} mm, jaws commanded "
+            f"{commanded}, pads stopped at {self.width_at_close * 1000:.1f} mm "
             f"then {self.width_after_lift * 1000:.1f} mm after a {self.lift_height * 100:.0f} cm lift"
         )
 
 
-# =================================================================================================
-# planning the descent
-# =================================================================================================
+# --- planning the descent -------------------------------------------------------------------------
+
+
+def table_referenced_depth(target: GraspTarget) -> float:
+    """Descend until the fingertips are just clear of the *table*, whatever the part's height is said to be.
+
+    The alternative, :func:`resolve_grasp_depth`, measures down from the top face -- so it inherits the
+    height, which on a colour-only pipeline is a catalog guess. Overestimate the height and the fingers
+    close in the air above the brick; underestimate it and they stop short of a real grip.
+
+    Measuring *up* from the touched-off table removes that: the part is sitting on the table, so the
+    lowest safe fingertip position is the same regardless of how tall the part is, and it engages the
+    whole side wall instead of the top third.
+
+    The risk this takes on is a brick resting on another brick, where the tabletop is not what is
+    underneath it -- which is what ``--contact-guard`` is for, and why this is not the default.
+    """
+    depth = (target.top_face_z - target.table_z) - MIN_FINGERTIP_CLEARANCE_M
+    logger.info(
+        f"Descending {depth * 1000:.1f} mm, measured up from the touched-off table rather than down from "
+        f"the part's {target.height * 1000:.1f} mm height, leaving "
+        f"{MIN_FINGERTIP_CLEARANCE_M * 1000:.1f} mm of fingertip clearance."
+    )
+    return max(depth, 0.0)
 
 
 def resolve_grasp_depth(target: GraspTarget, requested: Optional[float] = None) -> float:
-    """How far below the top face to descend, capped for the part actually being grasped.
-
-    Two caps, and the tighter one wins:
-
-    * the part's own geometry, which says how far the pads can go down its side before there is no
-      more side;
-    * the table under it, which says how low the fingertips may go at all.
-
-    On a 9.6 mm brick these agree and neither bites. On a 3.2 mm plate the second one is the only thing
-    between a grasp and a fingertip in the tabletop.
-    """
+    """How far below the top face to descend: the tighter of the part's height and the table under it."""
     geometric_ceiling = target.height - MIN_FINGERTIP_CLEARANCE_M
     table_ceiling = (target.top_face_z - target.table_z) - MIN_FINGERTIP_CLEARANCE_M
     ceiling = min(geometric_ceiling, table_ceiling)
@@ -146,14 +315,9 @@ def reachable_lift(
 ) -> Optional[Tuple[HomogeneousMatrixType, float]]:
     """The highest reachable straight-up lift from the grasp, at most ``requested`` metres.
 
-    Lifting is the last thing that happens and the arm is already stretched over the table by then, so
-    the requested height is the first thing to become unreachable. Refusing the run over that would
-    leave the brick gripped and still sitting on the table, which is strictly worse than lifting it
-    less far -- so the height is walked down until something is reachable.
-
-    Heights are computed off the step index and rounded rather than by repeated subtraction, which
-    drifts (0.10 - 3 x 0.01 lands at 0.06999999999999999) and can push a height that exactly fits the
-    arm's limit just past it, losing a whole centimetre.
+    The arm is stretched over the table by lift time, so the requested height is the first thing to go
+    unreachable -- and lifting less far beats leaving the brick gripped on the table. Heights come from
+    the step index rather than repeated subtraction, which drifts and can lose a whole centimetre.
     """
     steps = int(math.floor((requested - MIN_LIFT_HEIGHT_M) / LIFT_SEARCH_STEP_M + 1e-9))
     heights = [round(requested - step * LIFT_SEARCH_STEP_M, 6) for step in range(max(steps, 0) + 1)]
@@ -178,45 +342,48 @@ def ensure_above_table_floor(name: str, pose: HomogeneousMatrixType, table_z: fl
         )
 
 
-# =================================================================================================
-# the pick
-# =================================================================================================
+# --- the pick -------------------------------------------------------------------------------------
 
 
 def check_grasp(cell: C.Cell, target: GraspTarget) -> Tuple[bool, str]:
-    """Whether the jaws are holding a brick of the right width right now, and how we know.
+    """Whether the jaws are holding *anything*, and how we know. The brick's size does not come into it.
 
-    Both signals, because either alone lies -- see the module docstring. The commanded width is
-    deliberately inside the brick, so a gripper that reached its command is one that closed on nothing.
+    Only two questions are asked, and neither needs to know how big the part is: does the Robotiq's own
+    object-detection flag fire, and did the fingers stop short of shut? Either answer is enough --
+    something is between the pads or it is not.
+
+    This deliberately no longer checks the reached width against ``target.width``. That band compared a
+    measurement to a measurement: the reached opening is good to a few tenths of a millimetre, and the
+    expected width is a colour footprint good to a few millimetres, so the band rejected sound grasps
+    far more often than it caught bad ones. A part that is not the one submodule_1 named is still a part
+    in the gripper, and sorting is Module 3's job -- lifting it is strictly better than dropping it to
+    protect a number we do not trust.
+
+    The width is still reported, because it is the honest measurement of what is actually held.
     """
     width = cell.finger_width()
-    commanded = cell.commanded_gripper_width
-    if not cell.is_an_object_grasped():
-        return False, f"the gripper reports no object between the fingers (width {width * 1000:.1f} mm)"
-    if width <= commanded + 0.0005:
-        return False, f"the pads reached {width * 1000:.1f} mm, the width they were commanded to -- nothing between them"
-    if width < target.width - WIDTH_TOLERANCE_BELOW_M:
-        return False, f"the pads closed to {width * 1000:.1f} mm, under the brick's {target.width * 1000:.1f} mm"
-    if width > target.width + WIDTH_TOLERANCE_ABOVE_M:
-        return False, (
-            f"the pads stopped at {width * 1000:.1f} mm, too wide for a {target.width * 1000:.1f} mm brick -- "
-            "something else is in the grip"
+    floor = cell.gripper_calibration.min_width
+    stopped_short = width > floor + HELD_MIN_OPENING_M
+    flagged = cell.is_an_object_grasped()
+
+    if flagged or stopped_short:
+        how = "the object-detection flag" if flagged else "the pads stopping short of shut"
+        expected = (
+            f", where submodule_1 measured {target.width * 1000:.1f} mm" if target.width > 0 else ""
         )
-    return True, f"holding a {width * 1000:.1f} mm object (the brick measured {target.width * 1000:.1f} mm)"
+        return True, f"holding a {width * 1000:.1f} mm object on {how}{expected}"
+    return False, (
+        f"the pads closed to {width * 1000:.1f} mm, effectively shut, and the object-detection flag is "
+        "clear -- there is nothing between them"
+    )
 
 
 def descend(cell: C.Cell, grasp_pose: HomogeneousMatrixType, contact_guard: bool) -> None:
-    """Move down to the grasp, optionally stopping early if the tool touches something.
+    """Move down to the grasp, optionally stopping early on contact.
 
-    The descent is short and the fingers are open around the brick, so nothing *should* be touched on
-    the way down -- which makes contact a reliable signal that something is wrong: the table is higher
-    than the calibration says, or the brick is sitting on another brick. With ``contact_guard`` the
-    UR's own contact detection is armed downward for the move and the arm stops itself instead of
-    leaning on whatever it found.
-
-    Off by default. The measured table plane is what stops the arm reaching the tabletop at all, and
-    this is a second line of defence rather than a substitute; force detection on a UR3e at these
-    speeds can also fire on nothing, and a false trigger costs a grasp.
+    Nothing should be touched on the way down, so contact reliably means the table is higher than the
+    calibration says or the brick sits on another. Off by default: the measured table plane is the
+    real defence, and force detection on a UR3e at these speeds can fire on nothing.
     """
     if not contact_guard:
         cell.move_tcp_to(grasp_pose, linear=True)
@@ -256,22 +423,33 @@ def run(
     grasp_depth: Optional[float] = None,
     lift_height: float = LIFT_HEIGHT_M,
     contact_guard: bool = False,
+    relook: bool = RELOOK_FROM_PREGRASP,
+    deep_grasp: bool = False,
 ) -> GraspResult:
     """Descend onto the brick under the pregrasp, close, lift, and say whether it is held.
 
-    Every pose is solved and floor-checked before anything moves, and the lift is planned *before* the
-    brick is touched: a brick that can be grasped but not raised is not worth grasping, and finding
-    that out afterwards means finding it out with the brick in the jaws.
+    With ``relook`` the brick is re-measured from where the arm is standing before anything is
+    planned. That has to happen first: every pose below is built from ``target.position``, so
+    correcting the position afterwards would send the arm to poses computed for somewhere else.
+
+    Every pose is solved and floor-checked before anything moves, and the lift is planned before the
+    brick is touched: finding out afterwards means finding out with the brick in the jaws.
     """
     if cell.gripper is None:
         raise RuntimeError("This cell has no gripper connected; build it with `with_gripper=True`.")
 
-    depth = resolve_grasp_depth(target, grasp_depth)
+    if relook:
+        relocate_from_pregrasp(cell, target)
+        reposition_over(cell, target)
+
+    if deep_grasp and grasp_depth is None:
+        depth = table_referenced_depth(target)
+    else:
+        depth = resolve_grasp_depth(target, grasp_depth)
     width = target.approach_width
 
     grasp_position = np.array([target.position[0], target.position[1], target.top_face_z - depth])
-    # Floor-checked from the position rather than a pose, because every equivalent yaw the IK might
-    # come back with sits at the same height and the check is only ever about height.
+    # From the position rather than a pose: every equivalent yaw sits at the same height.
     ensure_above_table_floor(
         "The grasp", C.top_down_tool_pose(cell, grasp_position, target.closing_heading, width), target.table_z
     )
@@ -304,8 +482,11 @@ def run(
         C.stop_arm(cell)
         raise RuntimeError(f"The descent stopped: {exception}") from exception
 
-    close_width = max(target.width - GRIPPER_SQUEEZE_M, cell.gripper_calibration.min_width)
-    logger.info(f"Closing: commanding {close_width * 1000:.1f} mm on a {target.width * 1000:.1f} mm brick ...")
+    close_width = cell.gripper_calibration.min_width if CLOSE_FULLY else target.width
+    logger.info(
+        f"Closing the jaws shut on whatever is between them (submodule_1 measured "
+        f"{target.width * 1000:.1f} mm, which the close does not rely on) ..."
+    )
     cell.move_gripper_to_width(close_width)
 
     holding, reason = check_grasp(cell, target)
@@ -345,10 +526,8 @@ def run(
 
 
 def _release_and_retreat(cell: C.Cell, target: GraspTarget) -> None:
-    """Recover from a failed grasp: let go first, then go back up.
-
-    Order matters. Opening first drops whatever was half-caught straight back where it came from, from
-    millimetres up, instead of carrying it somewhere else and dropping it there.
+    """Recover from a failed grasp. Open first, then retreat: that drops whatever was half-caught back
+    where it came from instead of carrying it somewhere else.
     """
     logger.info("Opening the jaws and retreating to the pregrasp.")
     with contextlib.suppress(Exception):
@@ -375,25 +554,21 @@ def place(cell: C.Cell, target: GraspTarget, position: np.ndarray = DROP_POSITIO
     cell.move_arm_to(q)
     cell.move_gripper_to_width(cell.gripper_calibration.max_width)
     cell.advance(0.4)
-    # Stand back up before handing control back. The next thing to happen is a move to a viewpoint at
-    # the far side of the table, and starting that from a pose centimetres above the tabletop is asking
-    # the arm to drag its wrist across everything in between.
+    # Stand back up: the next move is to a viewpoint across the table, and starting that from
+    # centimetres above the tabletop drags the wrist through everything in between.
     park(cell)
     return True
 
 
-# =================================================================================================
-# CLI
-# =================================================================================================
+# --- CLI ------------------------------------------------------------------------------------------
 
 
 def main() -> None:
-    """Grasp the brick submodule_1 left the arm standing over. The standalone half of the pipeline.
+    """Grasp the brick submodule_1 left the arm standing over.
 
-    Rebuilds a :class:`GraspTarget` from the handoff file submodule_1 wrote and from the pose the arm
-    is currently parked at, then runs the same :func:`run` the notebook does. The handoff is refused if
-    it is stale or describes a brick somewhere other than where the arm is standing, which is exactly
-    the check that catches the arm having been moved between the two commands.
+    Rebuilds a :class:`GraspTarget` from the handoff file and the arm's current pose, then runs
+    :func:`run`. The handoff is refused if stale or if it describes a brick somewhere other than where
+    the arm is standing.
     """
     import click
 
@@ -409,6 +584,21 @@ def main() -> None:
     @click.option("--grasp-depth-mm", type=click.FloatRange(0.0, 80.0), default=None, help="Overrides the default descent, still capped by the table.")
     @click.option("--handoff-path", default=BRICK_HANDOFF_PATH, show_default=True)
     @click.option("--contact-guard", is_flag=True, help="Arm the UR's contact detection during the descent.")
+    @click.option(
+        "--deep-grasp/--no-deep-grasp",
+        default=False,
+        show_default=True,
+        help="Descend until the fingertips are just clear of the touched-off table instead of measuring "
+        "down from the part's assumed height. More grip and no dependence on the height, at the cost of "
+        "driving into whatever is under a brick that is not sitting on the table.",
+    )
+    @click.option(
+        "--relook/--no-relook",
+        default=RELOOK_FROM_PREGRASP,
+        show_default=True,
+        help="Re-measure the brick from the pregrasp before descending, instead of trusting the survey's "
+        "position. Costs one frame and no arm motion unless the camera is too close for depth.",
+    )
     @click.option("--place/--no-place", "place_it", default=False, show_default=True, help="Carry the brick to the drop corner afterwards.")
     @click.option("--yes", "-y", is_flag=True, help="Skip the confirmation prompt before descending.")
     def command(
@@ -421,6 +611,8 @@ def main() -> None:
         grasp_depth_mm: Optional[float],
         handoff_path: str,
         contact_guard: bool,
+        deep_grasp: bool,
+        relook: bool,
         place_it: bool,
         yes: bool,
     ) -> None:
@@ -460,6 +652,8 @@ def main() -> None:
                     grasp_depth=None if grasp_depth_mm is None else grasp_depth_mm / 1000.0,
                     lift_height=lift_height,
                     contact_guard=contact_guard,
+                    relook=relook,
+                    deep_grasp=deep_grasp,
                 )
             except KeyboardInterrupt:
                 logger.warning("Interrupted; stopping the arm.")
@@ -478,18 +672,16 @@ def main() -> None:
     command()
 
 
-#: How far the handoff's brick may be from where the arm is standing and still be believed. Wider than
-#: this and the arm has been moved, freedriven or re-run since submodule_1 wrote the file, which is
-#: exactly when trusting its dimensions would be wrong.
+#: How far the handoff's brick may be from where the arm stands and still be believed. Wider than this
+#: and the arm has been moved since submodule_1 wrote the file.
 HANDOFF_POSITION_TOLERANCE_M = 0.01
 
 
 def read_handoff(path: str, max_age: float, expected_position: Optional[np.ndarray] = None) -> Optional[dict]:
     """Load submodule_1's handoff, or ``None`` with a reason logged if it should not be trusted.
 
-    Three ways it is refused, all meaning "this describes a different brick than the one under the
-    gripper": the file is missing, it is older than ``max_age``, or the brick it recorded is not where
-    the arm is now standing. The last one is the useful one.
+    Refused if missing, older than ``max_age``, or recording a brick that is not where the arm now
+    stands -- all meaning it describes a different brick than the one under the gripper.
     """
     import json
 
@@ -525,11 +717,10 @@ def read_handoff(path: str, max_age: float, expected_position: Optional[np.ndarr
 
 
 def _target_from_handoff(handoff: dict, pregrasp_pose: HomogeneousMatrixType, cell: C.Cell) -> GraspTarget:
-    """Rebuild the target submodule_1 measured, from its handoff plus the pose the arm is parked at.
+    """Rebuild submodule_1's target from its handoff plus the pose the arm is parked at.
 
-    The x and y come from the *pregrasp pose*, not the file: whatever the file says, the descent has to
-    happen straight down from where the arm actually is, or the fingers move sideways on the way in.
-    ``read_handoff`` has already refused the file if those two disagree by more than a few millimetres.
+    x and y come from the pregrasp pose, not the file: the descent has to go straight down from where
+    the arm actually is. ``read_handoff`` has already refused the file if the two disagree.
     """
     x, y = float(pregrasp_pose[0, 3]), float(pregrasp_pose[1, 3])
     height = float(handoff.get("height") or 0.0096)

@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import os
 import sys
-from typing import Optional, Sequence, Tuple
+from typing import Optional, Sequence
 
 import click
 import cv2
@@ -73,19 +73,7 @@ def tilt_degrees(plane: Sequence[float]) -> float:
     return float(np.degrees(np.arctan(np.hypot(a, b))))
 
 
-def _normal(plane: Sequence[float]) -> np.ndarray:
-    normal = np.array([-plane[0], -plane[1], 1.0])
-    return normal / np.linalg.norm(normal)
-
-
-def angle_between(first: Sequence[float], second: Sequence[float]) -> float:
-    """Angle between two planes, in degrees.
-
-    The angle between their *normals*, not the difference of their tilts: two planes can lean by the
-    same amount in opposite directions, which is a difference of zero by tilt and twice the tilt in
-    fact. Getting this wrong reports two surfaces 3 degrees apart as agreeing to half a degree.
-    """
-    return float(np.degrees(np.arccos(np.clip(float(_normal(first) @ _normal(second)), -1.0, 1.0))))
+angle_between = perception.angle_between
 
 
 def histogram(heights_mm: np.ndarray, width: int = 46) -> None:

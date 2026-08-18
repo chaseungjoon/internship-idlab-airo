@@ -1,51 +1,44 @@
 """m1 submodule 1 (physical): look at the pile from two viewpoints, pick a brick, stand over it.
 
-This is what used to be submodule_3 (*which* brick) and submodule_1 (*where* it is, and go there) run
-as two processes passing a JSON file between them. They are one step now, exactly as they already are
-in :mod:`m1.simulation.submodule_1` -- read the two files side by side and they say the same things in
-the same order. That is the point: the simulation is where this logic is exercised a hundred times an
-afternoon, and it is only worth trusting on the bench if it is the same logic.
+**Colour, not depth.** Which regions are bricks comes from :mod:`prototypes.pile_perception`, the
+robot-free RGB pipeline. The depth stream is captured with each frame and deliberately ignored.
 
-**The perception is shared, not mirrored.** Both stacks call
-:func:`m1.physical.submodule_3.analyse_pile` -- the same function, thresholds and scoring. What this
-module adds is the part that needs two views:
+That is a deliberate reversal. The depth path measures every height against a plane, so that one
+assumption decides everything: where the camera's idea of the tabletop and the arm's disagree by a
+constant offset -- a board standing on another table, a hand-eye calibration still settling -- bare
+wood reads as standing proud, the table model has nothing to seed from, and the regions reported are
+wood rather than bricks. Colour asks only whether a pixel looks like the tabletop, which no
+calibration error can change.
 
-* **View 1 decides.** Which brick is grasped, and everything measured about it -- width, length,
-  height, long axis, score, confidence -- comes from view 1 and view 1 only. This is the second place
-  the bench deliberately parts company with the simulation, which requires *both* views to find a
-  brick before it will grasp it. On this rig the two views hardly ever agree: the table is small, so
-  the two viewpoints look across the pile at shallow, very different angles, and between that and the
-  hand-eye calibration's lateral error a brick's two centres routinely land further apart than the
-  brick is wide. Demanding agreement there does not filter out segmentation accidents, it filters out
-  the whole pile -- and a second opinion that is wrong is worth less than one good view.
-* **Both views measure.** The triangulation still uses both lines of sight, because that is the one
-  thing a single view cannot do at all. Each brick view 1 picked out is paired, when it can be, with
-  the region view 2 saw in the same place, and the two rays are triangulated against each other. The
-  position actually used is view 1's ray projected onto the table plane raised by one brick height; a
-  brick view 2 never saw keeps that position and simply has no triangulation to show for it.
+**What it gives up, and buys back.** Height. There is no depth to measure it from, so a brick's height
+comes from :mod:`common.lego_catalog` when its footprint matches a part and from
+``config.FALLBACK_BRICK_HEIGHT`` when it does not. That matters more than it sounds: the height sets
+the plane the outline is projected onto, so it feeds back into the position -- which is why
+:func:`measure` measures the footprint twice, once at the assumed height and once at the matched one.
 
-**Which of the two is used is the one real difference from the simulation.** There, the hand-eye
-transform is exact, so triangulation is the better estimate and the plane projection is the
-cross-check. Here it is the other way round, and not by a little: both rays start at the camera
-centre, which the hand-eye calibration gets wrong by centimetres, so their intersection is wrong by
-centimetres *in every axis including z*. The ray-plane projection instead takes its z from the table
-the arm physically touched, and leaves only x and y carrying the calibration error -- a few
-millimetres sideways still grasps a 7.8 mm brick, nine centimetres too high grasps nothing at all.
-That projection is view 1's ray alone, not the midpoint of the two views'. Averaging in a view that
-disagrees by more than the brick is wide does not cancel the error, it splits the difference between a
-measurement and a guess; view 1 is the view the brick was chosen from, so it is the view the arm is
-sent to.
-So :data:`POSITION_SOURCE_PREFERENCE` is ``"plane_projection"`` here and ``triangulation`` there, the
-triangulated point is computed anyway, and the gap between the two is printed every run: it is a
-direct, honest measure of what the rig's calibration is costing, and the number to watch after a
-re-calibration.
+**How two views become one position.** Without depth neither view knows where anything is on its own,
+so each view's ray is crossed with the table plane first and the *matching* runs on those base-frame
+positions. Triangulation comes afterwards, on the pairs that produces.
 
-**One survey, many picks.** The two viewpoints cost the better part of a minute of arm travel and two
-full pile analyses, and paying that for every single brick is most of the cycle time. So
-:func:`survey` locates *every* brick view 1 found graspable, not just the winner, and hands back a
-:class:`PileMap` ranked best-first; :class:`PileSession` then serves picks out of it without moving the
-camera again. The pile is looked at again only when the map runs low -- which is also the moment the
-bricks that were occluded at the start have become visible, and get their position measured then.
+* **View 1 decides.** Which brick is grasped and everything measured about it comes from view 1 alone.
+  On this small table the two viewpoints look across the pile at shallow, very different angles, so
+  with hand-eye error a brick's two centres routinely land further apart than the brick is wide.
+  Demanding agreement filters out the whole pile, not the segmentation accidents.
+* **Both views measure.** Triangulation is the one thing a single view cannot do, so each of view 1's
+  bricks is paired where possible with view 2's region in the same place.
+
+:data:`POSITION_SOURCE_PREFERENCE` picks which of the two the arm is actually sent to. Both are always
+computed and the gap between them printed every run, because that gap is a direct measure of what the
+rig's calibration is costing. Be warned which way the evidence points: both rays start at the camera
+centre, so a hand-eye translation error moves their intersection in *every* axis including z, while
+the ray-plane projection takes z from the table the arm physically touched and leaves only x and y
+carrying it. On a rig whose hand-eye is still settling, ``"plane_projection"`` is usually the better
+call -- it is one word to change here, and ``--position-source`` on the command line.
+
+**One survey, many picks.** The two viewpoints cost most of the cycle time, so :func:`survey` locates
+*every* brick view 1 found graspable and returns a :class:`PileMap` ranked best-first;
+:class:`PileSession` serves picks from it without moving the camera. The pile is looked at again only
+when the map runs low -- which is also when the bricks occluded at the start have become visible.
 """
 
 from __future__ import annotations
@@ -58,6 +51,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
+import cv2
 import numpy as np
 from airo_camera_toolkit.pinhole_operations import (
     calculate_triangulation_errors,
@@ -73,14 +67,16 @@ if _SRC_DIR not in sys.path:
     sys.path.insert(0, _SRC_DIR)
 from common.config import BRICK_HANDOFF_PATH, PREGRASP_HEIGHT  # noqa: E402
 from m1.physical import cell as C  # noqa: E402
-from m1.physical.submodule_3 import Brick, PileAnalysis, analyse_pile, assign_priorities  # noqa: E402
+import prototypes.pile_perception as colour  # noqa: E402
+from common.config import FALLBACK_BRICK_HEIGHT  # noqa: E402
+from common.lego_catalog import load_catalog, match_footprint  # noqa: E402
+from m1.physical.submodule_3 import PileView, project_pixels_onto_plane  # noqa: E402
 
-#: Where the camera is put to look at the pile, and what it looks at. Two viewpoints roughly 30 cm
-#: apart across the pile: far enough for real parallax, close enough that both are comfortably inside
-#: a UR3e's reach and both see the whole pile. Only used when the matching entry in
-#: :data:`m1.physical.cell.VIEWPOINT_JOINT_CONFIGURATIONS` is ``None`` -- on the bench the measured
-#: joint configurations are preferred, because they are known to be reachable and comfortable, which a
-#: fresh IK solution at the edge of the workspace is not.
+Brick = colour.Brick
+
+#: Where the camera looks from, and at what. Two viewpoints ~30 cm apart: enough parallax, both
+#: inside a UR3e's reach, both seeing the whole pile. Only used when the matching entry in
+#: :data:`m1.physical.cell.VIEWPOINT_JOINT_CONFIGURATIONS` is ``None``.
 VIEWPOINTS: Tuple[Tuple[str, Tuple[float, float, float]], ...] = (
     ("view 1", (0.24, -0.13, 0.33)),
     ("view 2", (0.24, 0.17, 0.33)),
@@ -88,97 +84,103 @@ VIEWPOINTS: Tuple[Tuple[str, Tuple[float, float, float]], ...] = (
 VIEW_TARGET = (C.PILE_CENTER[0], C.PILE_CENTER[1], 0.0)
 VIEW_SETTLE_DURATION = 0.4
 
-#: Two views are looking at the same brick if their base-frame centres are within this of each other.
-#: A lego stud is 8 mm from the next one, so anything looser could pair a brick with its neighbour;
-#: anything tighter would reject a genuine match on ordinary measurement scatter. Kept a shade looser
-#: than the simulation's 6 mm, because here both centres carry the hand-eye calibration's lateral
-#: error and the two views do not carry it in the same direction.
-#:
-#: **This no longer decides whether a brick is grasped** -- view 1 decides that on its own. All a
-#: failed match costs now is the triangulated cross-check for that one brick, which is why it can stay
-#: this tight: a pair that is really a brick and its neighbour would produce a triangulated point that
-#: is worse than none at all, and the number printed next to it would be a lie about the calibration.
+#: Two views are looking at the same brick if their base-frame centres are within this. A stud is
+#: 8 mm, so anything looser could pair a brick with its neighbour. Looser than the simulation's 6 mm
+#: because both centres carry hand-eye error, in different directions. This no longer decides whether
+#: a brick is grasped -- a failed match only costs the triangulated cross-check.
 MATCH_TOLERANCE_M = 0.008
-#: ...and if they agree which way it points. Position alone is not enough: a region that merged two
-#: touching bricks can sit within a millimetre of a real one and still be a completely different
-#: rectangle, so the two lines of sight would not be aimed at the same part of the same brick.
+#: ...and if they agree which way it points. A region that merged two touching bricks can sit within
+#: a millimetre of a real one and still be a completely different rectangle.
 MATCH_HEADING_TOLERANCE_DEG = 15.0
-#: Under this aspect ratio a footprint is square enough that its "long axis" is whichever side the
-#: measurement noise favoured, so it is not compared across views.
+#: Under this aspect ratio the "long axis" is whichever side the noise favoured, so it is not compared.
 SQUARE_ASPECT_RATIO = 1.25
 
-#: Which of the two position estimates is used. See the module docstring -- this is the one place the
-#: bench deliberately disagrees with the simulator, and the reason is the hand-eye calibration.
-POSITION_SOURCE_PREFERENCE = "plane_projection"
-#: Above this the two lines of sight are missing each other by more than the brick they are aimed at.
-#: It does not change the answer here (the projection is used regardless) but it is worth saying out
-#: loud, because it means the two views are not looking at the same thing.
+#: Which position estimate is used. See the module docstring: the one place the bench deliberately
+#: disagrees with the simulator.
+POSITION_SOURCE_PREFERENCE = "triangulation"
+#: Confidence below which a colour region is never offered to the arm. The colour pipeline's own bar.
+MIN_CONFIDENCE = colour.PRIORITY_MIN_CONFIDENCE
+#: Height assumed on the first projection pass, before the catalog has had a look. Only the footprint
+#: measured at this height matters, and a 6 mm error there moves it by well under a millimetre.
+ASSUMED_HEIGHT_M = FALLBACK_BRICK_HEIGHT
+#: How far a measured footprint may sit from a catalog part's and still be called that part.
+CATALOG_TOLERANCE_M = 0.004
+
+#: Fingertip engagement -- height less the clearance kept above the table -- at which the grip-depth
+#: preference saturates. Roughly two thirds of a full brick's side wall.
+GRIP_DEPTH_SATURATION_M = 0.006
+#: How much of the final ordering is grip depth rather than the colour pipeline's own score.
+#:
+#: This term exists because the colour score cannot contain it. ``SCORE_WEIGHTS`` rates clearance,
+#: isolation, exposure, visibility, width fit, size and confidence -- and a plate lying alone on bare
+#: table scores full marks on every one of them. It is also 3.2 mm tall, which leaves the pads under
+#: two millimetres of purchase and turns the close into a shove, and nothing colour can see says so.
+#: The depth pipeline had a ``grip_depth`` term for exactly this; here the height comes from the
+#: catalog instead, but the preference has to be applied just the same or the ranking sends the arm at
+#: the hardest grasps in the pile first.
+GRIP_DEPTH_WEIGHT = 0.35
+#: Clearance the fingertips keep above the table, mirroring submodule_2's descent cap. Subtracted from
+#: the height to get the side wall actually reachable.
+FINGERTIP_CLEARANCE_M = 0.0015
+
+_UNLOADED = object()
+_CATALOG: Optional[Dict] = _UNLOADED  # type: ignore[assignment]
+#: Above this the two lines of sight miss each other by more than the brick. Does not change the
+#: answer, but means the views are not looking at the same thing.
 MAX_TRIANGULATION_GAP_M = 0.020
-#: Above this, the two views' own ray-plane projections disagree about where the brick is by more than
-#: the jaws have slack. It changes nothing -- view 1's projection is what the arm is sent to either way
-#: -- and it is still printed every run, because it and the ray gap are the only measurements of the
-#: calibration this rig can make without a ground truth.
+#: Above this the two views' own projections disagree by more than the jaws have slack. Changes
+#: nothing -- view 1's projection is used either way -- but it is one of the only calibration
+#: measurements this rig can make without ground truth.
 MAX_VIEW_DISAGREEMENT_M = 0.010
 
-#: The approach is a staircase straight down over the brick: high, lower, pregrasp. Every leg is a
-#: joint-space move, which is not a straight line in the world -- so the one leg that crosses the
-#: table is made to end high above the pile, and the legs that come down are pure vertical descents
-#: over the same point with the same wrist angle, where joint space and the world agree.
+#: The approach is a staircase straight down over the brick: high, lower, pregrasp. Joint-space moves
+#: are not straight lines in the world, so the leg that crosses the table ends high above the pile and
+#: the rest are pure vertical descents, where joint space and the world agree.
 RETRACT_HEIGHT_M = 0.12
 APPROACH_HEIGHT_M = 0.06
-#: Retract heights to try over the brick, highest first. **Standing higher over a brick means reaching
-#: less far, not further**, and by a lot: with the tool straight down the wrist has to be about 32 cm
-#: above the fingertips, and every centimetre the fingertips rise pushes the wrist a centimetre further
-#: from a shoulder that only reaches 46 cm. So a brick can be perfectly graspable and still have no
-#: reachable pose 12 cm above it -- which is exactly the pose that used to fail the whole pick, over a
-#: leg that exists only to keep the arm clear of the pile while it crosses. Taking the highest one that
-#: solves keeps that intent and stops throwing away bricks for it. The last entry equals
-#: :data:`APPROACH_HEIGHT_M`, below which the retract has stopped being a retract.
+#: Retract heights to try, highest first. **Standing higher over a brick means reaching less far**:
+#: the wrist sits ~32 cm above the fingertips, so every centimetre they rise pushes it a centimetre
+#: further from a shoulder that only reaches 46 cm. Taking the highest that solves keeps the intent --
+#: staying clear of the pile while crossing -- without throwing bricks away for it. The last entry
+#: equals :data:`APPROACH_HEIGHT_M`, below which a retract has stopped being one.
 RETRACT_HEIGHTS_M = (RETRACT_HEIGHT_M, 0.10, 0.08, APPROACH_HEIGHT_M)
-#: The arm has to actually arrive. Past this the pose it reached is not the pose everything downstream
-#: was computed for, and descending from it would put the fingers somewhere nobody planned.
+#: The arm has to actually arrive; past this, downstream poses were computed for somewhere else.
 MAX_PREGRASP_ERROR_M = 0.008
 
-#: The jaws are opened this much wider than the brick before the arm goes anywhere near it -- the same
-#: margin submodule_2 descends with, so the gripper is already at its approach opening on arrival.
-GRIPPER_APPROACH_MARGIN_M = 0.014
+#: Jaws opened this much wider than the brick before approaching -- the margin submodule_2 descends
+#: with, so the gripper arrives already at its approach opening. Half of it is the grasp's entire
+#: lateral error budget, per side.
+#:
+#: At 14 mm a 7 mm sideways error put a fingertip *on* the brick rather than around it, which is a
+#: collision and not a miss -- and 7 mm is inside what the survey's viewing angle alone can cost. 24 mm
+#: gives 12 mm a side. It is not free: wider jaws need more room from the neighbours, so bricks that
+#: were graspable at 14 mm can fail the clearance test at 24 mm. That is the right trade while the
+#: position is the weak link -- a brick skipped for lack of room costs a pick, a fingertip driven into
+#: a brick costs the pile.
+GRIPPER_APPROACH_MARGIN_M = 0.024
 
-# =================================================================================================
-# looking again, from straight above
-# =================================================================================================
+# --- looking again, from straight above -----------------------------------------------------------
 
 #: Camera heights above the brick's top face for the re-look, first that solves wins.
 #:
-#: **Why look again at all.** Every position here is an outline projected onto the plane of its own top
-#: face, so an error in that plane's height slides the answer sideways by ``height error x tan(angle off
-#: vertical)``. From a survey viewpoint across the table a brick is seen 20 to 30 degrees off vertical,
-#: where that tangent is 0.4 to 0.6 -- half of any height error lands in x and y. Looking from *directly
-#: above* makes the tangent zero, so the same height error moves the answer by nothing at all. It is the
-#: only one of the three error terms that geometry can remove for free, and it is the term that bites
-#: hardest on the parts whose height was guessed rather than measured.
-#:
-#: With the camera about 18 cm behind the fingertips along the tool axis, 30 cm of camera height puts the
-#: TCP roughly 12 cm over the brick -- the same height the retract leg uses, so a brick that can be
-#: grasped can usually be looked at this way too. The lower entries are for the ones near the edge of the
-#: workspace, where standing high is what runs out of reach first.
+#: Every position here is an outline projected onto the plane of its own top face, so a height error
+#: slides the answer sideways by ``height error x tan(angle off vertical)``. From a survey viewpoint
+#: that tangent is 0.4-0.6; from directly above it is zero. That is the one error term geometry
+#: removes for free. With the camera ~18 cm behind the fingertips, 30 cm of camera height puts the TCP
+#: ~12 cm over the brick; the lower entries are for bricks near the edge of the workspace.
 NADIR_CAMERA_HEIGHTS_M = (0.30, 0.26, 0.22)
-#: A part found this far from where the survey put it is taken to be the same part. It has to be *wider*
-#: than the error being corrected -- that is the entire point of the re-look -- and a lego stud is only
-#: 8 mm, so it is necessarily wider than the gap to the neighbour as well. No single number is safely
-#: both, which is why the size check below carries the other half of the burden.
+#: A part found this far from the survey's position is taken to be the same part. It must be wider
+#: than the error being corrected -- the point of the re-look -- and so is necessarily wider than the
+#: 8 mm gap to a neighbour. The size check below carries the other half of the burden.
 NADIR_MATCH_TOLERANCE_M = 0.025
-#: ...and it has to be about the same size. A neighbour that falls inside the tolerance above is usually
-#: a different part with a different footprint, and this is what catches it.
+#: ...and it has to be about the same size, which is what catches a neighbour inside the tolerance.
 NADIR_WIDTH_TOLERANCE_M = 0.006
-#: Above this, the re-look and the survey disagree about where the brick is by more than a grasp can
-#: absorb. The re-look's answer is used -- it is the one with no lever arm -- but this is the number that
-#: says the survey geometry is still wrong, and the one to watch after a re-calibration.
+#: Above this, the re-look and the survey disagree by more than a grasp can absorb. The re-look wins
+#: (no lever arm), but this is the number that says the survey geometry is still wrong.
 NADIR_CORRECTION_WARNING_M = 0.015
 
 
-# =================================================================================================
-# turning pixels into places
-# =================================================================================================
+# --- turning pixels into places -------------------------------------------------------------------
 
 
 def pixel_to_base_ray(
@@ -186,9 +188,8 @@ def pixel_to_base_ray(
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Back-project pixel ``(u, v)`` to a ray ``(origin, unit direction)`` in the robot base frame.
 
-    Pinhole model: the camera-frame ray is ``K^-1 [u, v, 1]`` in the optical convention (+z forward,
-    +y down, the one the RealSense point cloud and airo-mono's unprojection both use), rotated into the
-    base frame by the eye-in-hand camera pose. The ray's origin is the camera centre.
+    Pinhole, optical convention (+z forward, +y down), rotated into the base frame by the eye-in-hand
+    camera pose. The origin is the camera centre.
     """
     direction_camera = np.linalg.inv(np.asarray(intrinsics_matrix, float)) @ np.array([u, v, 1.0])
     camera_in_base = SE3Container.from_homogeneous_matrix(np.asarray(X_base_camera, float))
@@ -196,8 +197,8 @@ def pixel_to_base_ray(
     return camera_in_base.translation, direction_base / np.linalg.norm(direction_base)
 
 
-#: Below this angle between the two lines of sight there is not enough parallax to triangulate at all
-#: and the midpoint solve is numerically meaningless. Two degrees; the viewpoints give about forty-five.
+#: Below this angle there is too little parallax to triangulate and the midpoint solve is meaningless.
+#: Two degrees; the viewpoints give about forty-five.
 MIN_PARALLAX_DEG = 2.0
 
 
@@ -208,17 +209,11 @@ def triangulate_pixels(
 ) -> Tuple[np.ndarray, float]:
     """Midpoint triangulation of one point seen from several views, and how badly the rays miss.
 
-    airo-mono's :func:`multiview_triangulation_midpoint` does the solve -- it minimises the distance to
-    every line of sight at once, which for two views is the midpoint of their mutually closest points.
-    The gap returned is the sum of airo-mono's per-ray perpendicular errors, which for two rays *is*
-    the distance between those closest points: zero would mean the views agree perfectly about the
-    direction to the brick, and anything much larger than the brick means they are not looking at the
-    same thing.
+    The gap is the sum of airo-mono's per-ray perpendicular errors -- for two rays, the distance between
+    their closest points. Much larger than the brick means the views disagree.
 
     Raises:
-        RuntimeError: if the rays are near-parallel, i.e. the viewpoints give too little parallax. The
-            midpoint solve inverts a matrix that is singular in exactly that case, so this has to be
-            caught before rather than after.
+        RuntimeError: if the rays are near-parallel, which makes the midpoint solve singular.
     """
     poses = [np.asarray(pose, float) for pose in camera_poses]
     intrinsics = [np.asarray(matrix, float) for matrix in intrinsics_matrices]
@@ -249,19 +244,12 @@ def project_ray_onto_plane(
 ) -> np.ndarray:
     """Intersect a base-frame ray with the plane ``z = a*x + b*y + c``.
 
-    The other way to turn one line of sight into a point: instead of a second view, use the fact that
-    the height is already known -- the table, raised by one brick. It fixes the answer's z outright and
-    leaves only x and y carrying any error, which on the bench is the trade worth making.
-
-    A *tilted* plane, because the tabletop is not exactly square to the robot's base and a tilt of one
-    degree is 7 mm across a 40 cm workspace -- more than the fingertip clearance a plate leaves. The
-    closed form below is the tilted generalisation of airo-mono's ``unproject_onto_world_z_plane``,
-    and reduces to it exactly when ``a = b = 0``; :func:`project_pixel_onto_plane` calls the airo-mono
-    version directly in that case.
+    Uses the known height -- the table, raised by one brick -- to fix z outright, leaving only x and y
+    carrying error. Tilted, because one degree is 7 mm across a 40 cm workspace; reduces to airo-mono's
+    ``unproject_onto_world_z_plane`` when ``a = b = 0``.
 
     Raises:
-        RuntimeError: if the ray is near-horizontal, runs parallel to the plane, or the plane is
-            behind the camera.
+        RuntimeError: if the ray is near-horizontal, parallel to the plane, or the plane is behind it.
     """
     origin, direction = ray
     if abs(direction[2]) < 0.2:  # more than ~78 degrees off vertical
@@ -298,32 +286,36 @@ def project_pixel_onto_plane(
     return project_ray_onto_plane(pixel_to_base_ray(u, v, intrinsics_matrix, X_base_camera), a, b, c)
 
 
-# =================================================================================================
-# what one look at the pile leaves behind
-# =================================================================================================
+# --- what one look at the pile leaves behind ------------------------------------------------------
 
 
 @dataclass
 class ViewResult:
-    """One viewpoint: where it looked from, what it saw, and what it made of it."""
+    """One viewpoint: where it looked from, and what the colour pipeline made of it."""
 
     name: str
     eye: np.ndarray
     joint_configuration: np.ndarray
-    analysis: PileAnalysis
+    view: PileView
+    analysis: Dict
+    projected: Dict[int, np.ndarray] = field(default_factory=dict)
+
+    @property
+    def bricks(self) -> List[Brick]:
+        return list(self.analysis["bricks"])
 
     @property
     def graspable(self) -> List[Brick]:
-        return [b for b in self.analysis.ordered if b.graspable and b.confidence >= 0.7]
+        """View 1's shortlist: ranked, confident, and a grasp on its own geometry."""
+        return [b for b in self.analysis["ordered"] if b.graspable and b.confidence >= MIN_CONFIDENCE]
 
 
 @dataclass
 class GraspTarget:
-    """The brick submodule_2 is to grasp, and everything it needs to know to do it.
+    """The brick submodule_2 is to grasp, and everything it needs to do it.
 
-    What used to travel between the two processes as ``run/brick_handoff.json``, now passed directly
-    because the two halves run in one process. :meth:`to_handoff` still writes that file, so the
-    standalone ``submodule_2`` command-line path keeps working unchanged.
+    Passed directly now that both halves run in one process. :meth:`to_handoff` still writes
+    ``run/brick_handoff.json`` so the standalone ``submodule_2`` command line keeps working.
     """
 
     position: np.ndarray  # base frame, centre of the brick's top face
@@ -343,21 +335,18 @@ class GraspTarget:
     method_disagreement: float  # between the two methods, across the table
     view_disagreement: float  # between the two views' own projections; nan when view 2 never saw it
     position_source: str
-    #: Whether view 2 found this brick too. False means everything above came from view 1's ray alone
-    #: and there is no triangulation to compare it with -- not that the brick is any worse a grasp.
+    #: Whether view 2 found this brick too. False means no triangulation to compare against -- not that
+    #: the brick is a worse grasp.
     matched_in_second_view: bool = True
-    #: Whether the height above came from the depth stream or from ``config.FALLBACK_BRICK_HEIGHT``.
+    #: Whether the height came from the depth stream or from ``config.FALLBACK_BRICK_HEIGHT``.
     #:
-    #: This decides how much :attr:`position` is worth, not just :attr:`height`, because the position is
-    #: the outline projected onto the plane of the top face: a height that is wrong by h puts x and y
-    #: wrong by h times the tangent of the view angle, which at the edge of the frame is about half of
-    #: it. Worse, a *measured* height cancels an error in the touched-off table plane exactly -- it is
-    #: measured from that same plane and then added back to it -- while a guessed one does not cancel
-    #: anything, so a bad plane and a part with no depth on it compound instead. Parts standing on edge
-    #: are the usual case: the top face they show the camera is a narrow strip.
+    #: This decides how much :attr:`position` is worth, not just :attr:`height`: the position is the
+    #: outline projected onto the top face's plane, so a height wrong by h puts x and y wrong by h times
+    #: the view angle's tangent. A *measured* height also cancels an error in the touched-off plane
+    #: exactly, where a guessed one compounds with it. Parts standing on edge are the usual case.
     height_measured: bool = True
-    #: How far the straight-down re-look moved this brick from where the survey put it, in metres, or
-    #: ``nan`` if it was never re-looked at. This is the survey's own lateral error, measured.
+    #: How far the straight-down re-look moved this brick from the survey's position, or ``nan`` if it
+    #: was never re-looked at. The survey's own lateral error, measured.
     nadir_correction: float = float("nan")
 
     # where the arm ended up
@@ -415,9 +404,8 @@ class GraspTarget:
     def to_handoff(self, path: str = BRICK_HANDOFF_PATH) -> str:
         """Write the handoff file the standalone ``submodule_2`` command line reads.
 
-        Redundant when both halves run in one process -- submodule_2 is handed this object directly --
-        and kept because the two-terminal bench workflow is still the one to use when something is
-        going wrong and you want to stop between the halves and look.
+        Redundant when both halves run in one process, and kept because the two-terminal workflow is the one
+        to use when you want to stop between the halves and look.
         """
         payload = {
             "written_at": time.time(),
@@ -434,8 +422,8 @@ class GraspTarget:
             "part_number": None,
             "same_size_parts": [],
             "obstruction": 0.0,
-            # null rather than NaN when view 2 had no counterpart: NaN is not JSON, and the reader
-            # (submodule_2.target_from_handoff) already treats a missing value as "not measured".
+            # null rather than NaN: NaN is not JSON, and the reader already treats a missing value as
+            # "not measured".
             "view_disagreement": float(self.view_disagreement) if math.isfinite(self.view_disagreement) else None,
         }
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
@@ -445,24 +433,34 @@ class GraspTarget:
         return path
 
 
-# =================================================================================================
-# looking
-# =================================================================================================
+# --- looking --------------------------------------------------------------------------------------
 
 
-def observe(
-    cell: C.Cell, name: str, eye: Sequence[float], target: Sequence[float] = VIEW_TARGET
-) -> ViewResult:
-    """Move the camera to the viewpoint and run the pile perception on what it sees.
+def analyse_view(cell: C.Cell, view: PileView, name: str) -> ViewResult:
+    """Run the colour pipeline on a frame already captured, and wrap it as a :class:`ViewResult`.
 
-    Prefers the measured joint configuration in :data:`m1.physical.cell.VIEWPOINT_JOINT_CONFIGURATIONS`
-    over solving IK for ``eye``: on the bench a known-good configuration beats a fresh solution at the
-    edge of the workspace, and the triangulation does not care how the arm got there -- the camera pose
-    it uses is forward kinematics composed with the hand-eye calibration either way.
+    Split out of :func:`observe` so submodule_2 can re-measure a brick from the pregrasp through the
+    same code the survey uses. One perception, called from both halves.
+    """
+    return ViewResult(
+        name=name,
+        eye=np.asarray(view.X_base_camera, float)[:3, 3],
+        joint_configuration=cell.arm_positions(),
+        view=view,
+        analysis=colour.analyse(cv2.cvtColor(np.asarray(view.image_rgb), cv2.COLOR_RGB2BGR)),
+    )
+
+
+def observe(cell: C.Cell, name: str, eye: Sequence[float], target: Sequence[float] = VIEW_TARGET) -> ViewResult:
+    """Move the camera to the viewpoint and run the colour pipeline on what it sees.
+
+    The depth map is captured with the frame and deliberately ignored. Colour asks only whether a pixel
+    looks like the tabletop, which no calibration error can change -- where a height, measured against a
+    plane, is only ever as good as that plane.
     """
     configuration = C.VIEWPOINT_JOINT_CONFIGURATIONS.get(name)
     if configuration is not None:
-        logger.info(f"{name}: moving to the measured viewpoint configuration {np.round(configuration, 3)} rad ...")
+        logger.info(f"{name}: moving to the measured viewpoint configuration ...")
         cell.move_arm_to(configuration)
     else:
         pose = C.look_at_tool_pose(cell, np.asarray(eye, float), np.asarray(target, float))
@@ -470,73 +468,181 @@ def observe(
         if q is None:
             raise RuntimeError(
                 f"{name} at {np.round(eye, 3)} m is not reachable. Move the viewpoint closer to the base or "
-                "lower, and remember a UR3e only reaches about 66 cm. Alternatively, freedrive the arm to a "
-                "good viewpoint and record its joint configuration in cell.VIEWPOINT_JOINT_CONFIGURATIONS."
+                "lower, or freedrive the arm to a good one and record its joint configuration in "
+                "cell.VIEWPOINT_JOINT_CONFIGURATIONS."
             )
-        logger.info(f"{name}: moving the camera to {np.round(eye, 3)} m, looking at {np.round(target, 3)} m ...")
         cell.move_arm_to(q)
     cell.advance(VIEW_SETTLE_DURATION)
 
-    view = cell.capture(name)
-    analysis = analyse_pile(view, cell.table_plane, cell.robot_type)
-    # No arm is passed: eight IK calls per brick over the network is a poor way to spend a survey, and
-    # reachability is settled anyway by go_to_pregrasp, which solves every pose in the descent before
-    # the arm moves at all. A brick that turns out to be unreachable costs the session one skip.
-    assign_priorities(analysis.ordered, None, PREGRASP_HEIGHT)
+    result = analyse_view(cell, cell.capture(name), name)
+    analysis = result.analysis
     logger.info(
-        f"{name}: {len(analysis.bricks)} brick(s), "
-        f"{sum(1 for b in analysis.bricks if b.graspable)} graspable, "
-        f"{len(analysis.rejected)} region(s) dropped."
+        f"{name}: {len(result.bricks)} region(s), {len(result.graspable)} graspable and confident, "
+        f"{len(analysis['rejected'])} dropped."
     )
-    eye_position = np.asarray(view.X_base_camera, float)[:3, 3]
-    return ViewResult(
-        name=name, eye=eye_position, joint_configuration=cell.arm_positions(), analysis=analysis
-    )
+    return result
 
 
-def match_across_views(first: ViewResult, second: ViewResult) -> List[Tuple[Brick, Optional[Brick], float]]:
+# --- turning a colour region into a place -----------------------------------------------------------
+
+
+def catalog() -> Optional[Dict]:
+    """The lego catalog, loaded once. ``None`` if it cannot be built, which costs heights, not picks."""
+    global _CATALOG
+    if _CATALOG is _UNLOADED:
+        try:
+            _CATALOG = load_catalog()
+        except Exception as exception:  # noqa: BLE001 - a missing catalog must not stop a pick
+            logger.warning(
+                f"No lego catalog ({exception}); every height falls back to "
+                f"{FALLBACK_BRICK_HEIGHT * 1000:.1f} mm."
+            )
+            _CATALOG = None
+    return _CATALOG
+
+
+def grasp_pixel(brick: Brick, scale: float) -> Tuple[float, float]:
+    """The region's centre in the *source* frame's pixels.
+
+    The colour pipeline works at its own working resolution and the intrinsics describe the frame as
+    captured; mixing the two silently puts every ray in the wrong place.
+    """
+    return float(brick.obb_center_px[0] * scale), float(brick.obb_center_px[1] * scale)
+
+
+def obb_corners(brick: Brick, scale: float) -> np.ndarray:
+    """The region's oriented bounding box as four source-frame pixels."""
+    box = cv2.boxPoints(
+        ((brick.obb_center_px[0], brick.obb_center_px[1]),
+         (brick.obb_size_px[0], brick.obb_size_px[1]),
+         float(brick.obb_angle_deg))
+    )
+    return np.asarray(box, dtype=float) * scale
+
+
+def footprint_on_plane(
+    brick: Brick, result: ViewResult, plane: Tuple[float, float, float], height: float
+) -> Optional[Tuple[np.ndarray, float, float, float]]:
+    """Project the region's box onto the plane of its own top face and measure it there.
+
+    Returns ``(centre_xy, width_m, length_m, long_axis_heading)``, or ``None`` when the box does not
+    cross the plane -- which means the region is not on the table.
+
+    Fitted in millimetres, not metres: ``cv2.minAreaRect`` works in float32 and a table-frame coordinate
+    is around 0.3, so an 8 mm side would be quantised by the format rather than by the pixels.
+    """
+    a, b, c = plane
+    corners = obb_corners(brick, result.analysis["scale"])
+    projected = project_pixels_onto_plane(
+        corners, result.view.intrinsics_matrix, result.view.X_base_camera, (a, b, c + height)
+    )
+    if projected is None or len(projected) < 3:
+        return None
+
+    (cx, cy), (side_a, side_b), angle_deg = cv2.minAreaRect((projected[:, :2] * 1000.0).astype(np.float32))
+    angle = math.radians(angle_deg)
+    if side_a >= side_b:
+        length, width, heading = side_a, side_b, angle
+    else:
+        length, width, heading = side_b, side_a, angle + math.pi / 2
+    return np.array([cx / 1000.0, cy / 1000.0]), width / 1000.0, length / 1000.0, heading
+
+
+def measure(brick: Brick, result: ViewResult, plane: Tuple[float, float, float]) -> Optional[Tuple]:
+    """Footprint, catalog part and height for one region, refined once through the matched height.
+
+    This is what colour gives up and has to buy back. The outline is projected onto the plane at
+    ``table + height`` and the height is what the footprint is matched against, so the two are mutually
+    dependent: the first pass runs at :data:`ASSUMED_HEIGHT_M` and the second at whatever the catalog
+    said. It converges immediately -- a 6 mm error in the assumed height moves the footprint by well
+    under a millimetre.
+    """
+    parts = catalog()
+    height = ASSUMED_HEIGHT_M
+    measured = footprint_on_plane(brick, result, plane, height)
+    if measured is None:
+        return None
+    part = None
+    for _ in range(2):
+        centre, width, length, heading = measured
+        part = None
+        if parts:
+            candidates = match_footprint(parts, width, length, CATALOG_TOLERANCE_M)
+            part = candidates[0].part if candidates else None
+        new_height = part.height if part is not None else FALLBACK_BRICK_HEIGHT
+        if abs(new_height - height) < 1e-6:
+            break
+        height = new_height
+        refined = footprint_on_plane(brick, result, plane, height)
+        if refined is None:
+            break
+        measured = refined
+    centre, width, length, heading = measured
+    return centre, width, length, heading, height, part
+
+
+def project_all(result: ViewResult, plane: Tuple[float, float, float]) -> Dict[int, Tuple]:
+    """Every region this view found, measured on the table plane, keyed by region index.
+
+    This is what makes the two views comparable at all. Without depth neither view knows where anything
+    is on its own, so each one's ray is crossed with the table plane first -- and that is what the
+    matching runs on. The triangulation comes afterwards, on the pairs it produces.
+    """
+    measured: Dict[int, Tuple] = {}
+    for brick in result.bricks:
+        outcome = measure(brick, result, plane)
+        if outcome is None:
+            logger.debug(f"{result.name}: region #{brick.index} does not cross the table plane; skipping it.")
+            continue
+        measured[brick.index] = outcome
+        result.projected[brick.index] = outcome[0]
+    return measured
+
+
+def match_across_views(
+    first: ViewResult,
+    second: ViewResult,
+    first_measured: Dict[int, Tuple],
+    second_measured: Dict[int, Tuple],
+) -> List[Tuple[Brick, Optional[Brick], float]]:
     """Every graspable brick *view 1* found, each with view 2's counterpart where it has one.
 
-    View 1's list is the list: a brick is here because view 1 found it, ranked it graspable and
-    confident, and nothing view 2 does adds to or removes from that. See the module docstring -- on this
-    small table the two views disagree far too often for agreement to be a usable filter, and this is
-    where the simulation, which requires it, is deliberately not followed.
-
-    What view 2 is asked is only *"where else is this brick on your sensor"*, so it is matched against
-    every region it accepted rather than only the ones it would grasp: a brick half-hidden from view 2
-    is a poor grasp from over there and still a perfectly good second line of sight. Both views report
-    base-frame positions already, which is what makes this a distance test rather than a feature-
-    matching problem. Greedy nearest-neighbour over the candidate pairs sorted by distance, so the
-    closest, least ambiguous pairs claim their partners before the doubtful ones get a say; a view-1
-    brick left over is returned with ``None`` and a ``nan`` distance.
+    View 1's list is the list; nothing view 2 does adds to or removes from it. On this small table the
+    two views disagree far too often for agreement to be a usable filter. View 2 is asked only *where
+    else is this brick on your sensor*, so it is matched against every region it accepted rather than
+    only the ones it would grasp. Greedy nearest-neighbour over the pairs sorted by distance, so the
+    least ambiguous claim their partners first; a leftover comes back with ``None`` and a ``nan``.
     """
     candidates = []
     for a in first.graspable:
-        for b in second.analysis.bricks:
-            distance = float(np.linalg.norm(np.array(a.center_m) - np.array(b.center_m)))
+        if a.index not in first_measured:
+            continue
+        a_centre, a_width, a_length, a_heading, _, _ = first_measured[a.index]
+        for b in second.bricks:
+            if b.index not in second_measured:
+                continue
+            b_centre, b_width, b_length, b_heading, _, _ = second_measured[b.index]
+            distance = float(np.linalg.norm(a_centre - b_centre))
             if distance > MATCH_TOLERANCE_M:
                 continue
-            # Elongated bricks have to agree about which way they lie as well as where they are. A pair
-            # that agrees on the centre to a millimetre and disagrees on the axis by forty degrees is
-            # not one brick seen twice; it is one brick and one segmentation accident centred on it,
-            # and the two rays would not be aimed at the same place on the same part.
-            if min(a.aspect_ratio, b.aspect_ratio) >= SQUARE_ASPECT_RATIO:
-                gap = abs(_heading_difference(a.long_axis_heading, b.long_axis_heading))
-                if math.degrees(gap) > MATCH_HEADING_TOLERANCE_DEG:
+            if min(a_length / max(a_width, 1e-6), b_length / max(b_width, 1e-6)) > SQUARE_ASPECT_RATIO:
+                # Elongated bricks have to agree which way they lie as well as where they are.
+                if abs(math.degrees(_heading_difference(a_heading, b_heading))) > MATCH_HEADING_TOLERANCE_DEG:
                     continue
             candidates.append((distance, a, b))
-    candidates.sort(key=lambda item: item[0])
 
-    partners: Dict[int, Tuple[Brick, float]] = {}
-    used_second = set()
-    for distance, a, b in candidates:
-        if a.index in partners or b.index in used_second:
+    pairs: List[Tuple[Brick, Optional[Brick], float]] = []
+    taken_a, taken_b = set(), set()
+    for distance, a, b in sorted(candidates, key=lambda item: item[0]):
+        if a.index in taken_a or b.index in taken_b:
             continue
-        partners[a.index] = (b, distance)
-        used_second.add(b.index)
-
-    # In view 1's own ranking order, so the logs read down the list it produced.
-    return [(a, *partners.get(a.index, (None, float("nan")))) for a in first.graspable]
+        taken_a.add(a.index)
+        taken_b.add(b.index)
+        pairs.append((a, b, distance))
+    for a in first.graspable:
+        if a.index in first_measured and a.index not in taken_a:
+            pairs.append((a, None, float("nan")))
+    return pairs
 
 
 def locate(
@@ -544,111 +650,104 @@ def locate(
     second: ViewResult,
     a: Brick,
     b: Optional[Brick],
+    first_measured: Dict[int, Tuple],
+    second_measured: Dict[int, Tuple],
     plane: Tuple[float, float, float],
 ) -> Dict:
-    """Where the brick is: view 1's ray onto the table plane, triangulated against view 2 for the record.
+    """Where the brick is, by triangulation and by ray-plane projection, with both reported.
 
-    See the module docstring for why the projection is used rather than the triangulation, and why it is
-    view 1's ray alone. Everything the second view can add is still reported when it saw the brick: the
-    triangulated point, how badly the two rays missed each other, how far view 2's own projection
-    landed from view 1's, and how far the two methods ended up apart across the table. Those numbers are
-    the running measurement of the hand-eye calibration's error, and they cost nothing to keep.
-
-    ``b`` is ``None`` when view 2 has no counterpart for this brick. Then there is no second ray, the
-    two-view numbers come back ``nan``, and the position is exactly what it would have been anyway.
-
-    Raises:
-        RuntimeError: if *view 1's* line of sight cannot be crossed with the table plane at all, which
-            is the one failure that leaves the brick with no position. View 2 failing the same way costs
-            only the cross-check and is logged, not raised.
+    ``b`` is ``None`` when view 2 has no counterpart: there is then no second ray, the two-view numbers
+    come back ``nan``, and the position falls back to view 1's projection whatever
+    :data:`POSITION_SOURCE_PREFERENCE` says -- one ray cannot be triangulated.
     """
-    height = a.height_m
-    plane_a, plane_b, plane_c = plane
-    top_face = (plane_a, plane_b, plane_c + height)
+    a_centre, width, length, heading, height, part = first_measured[a.index]
+    top_face = (plane[0], plane[1], plane[2] + height)
 
-    ray_a = pixel_to_base_ray(*a.grasp_pixel, first.analysis.view.intrinsics_matrix, first.analysis.view.X_base_camera)
-    projected = project_ray_onto_plane(ray_a, *top_face)
+    a_pixel = grasp_pixel(a, first.analysis["scale"])
+    a_ray = pixel_to_base_ray(*a_pixel, first.view.intrinsics_matrix, first.view.X_base_camera)
+    projected = project_ray_onto_plane(a_ray, *top_face)
 
-    # nan rather than a copy of the projection: with one ray there is no triangulated point, and a
-    # number that looks like one would be read as agreement between views that never happened.
+    triangulated = np.array([np.nan] * 3)
+    gap = float("nan")
     view_disagreement = float("nan")
-    triangulated, gap = np.full(3, float("nan")), float("nan")
     if b is not None:
-        # How far apart the two views put the *brick*, in the plane the grasp happens in. On the bench
-        # this is the more legible of the two quality metrics: it is measured in the same units and the
-        # same direction as the error a grasp actually suffers from.
-        try:
-            point_b = project_ray_onto_plane(
-                pixel_to_base_ray(
-                    *b.grasp_pixel, second.analysis.view.intrinsics_matrix, second.analysis.view.X_base_camera
-                ),
-                *top_face,
-            )
-            view_disagreement = float(np.linalg.norm(projected[:2] - point_b[:2]))
-        except RuntimeError as exception:
-            logger.debug(f"{second.name} cannot project this brick onto the table plane: {exception}")
-
+        b_pixel = grasp_pixel(b, second.analysis["scale"])
         try:
             triangulated, gap = triangulate_pixels(
-                [a.grasp_pixel, b.grasp_pixel],
-                [first.analysis.view.intrinsics_matrix, second.analysis.view.intrinsics_matrix],
-                [first.analysis.view.X_base_camera, second.analysis.view.X_base_camera],
+                [a_pixel, b_pixel],
+                [first.view.intrinsics_matrix, second.view.intrinsics_matrix],
+                [first.view.X_base_camera, second.view.X_base_camera],
             )
         except RuntimeError as exception:
-            logger.debug(f"Reference triangulation unavailable: {exception}")
-            triangulated, gap = projected, float("nan")
-
-    # Compared in the horizontal plane only, because that is the only part of either point that is
-    # ever used: the grasp's z comes from the table plus the measured brick height either way.
-    disagreement = float(np.linalg.norm(triangulated[:2] - projected[:2]))
+            logger.warning(f"Could not triangulate region #{a.index}: {exception}")
+        view_disagreement = float(np.linalg.norm(a_centre[:2] - second_measured[b.index][0][:2]))
 
     source = POSITION_SOURCE_PREFERENCE
-    if source == "triangulation" and b is None:
-        logger.info(
-            f"{second.name} did not find this brick, so there is nothing to triangulate against; using "
-            f"{first.name}'s ray-plane projection instead."
-        )
+    if source == "triangulation" and not np.all(np.isfinite(triangulated)):
         source = "plane_projection"
-    elif source == "triangulation" and (not math.isfinite(gap) or gap > MAX_TRIANGULATION_GAP_M):
-        logger.warning(
-            f"The two lines of sight miss each other by {gap * 1000:.1f} mm, so the triangulated point is not "
-            "trustworthy; using the ray-plane projection instead."
-        )
-        source = "plane_projection"
-
+    position = triangulated if source == "triangulation" else projected
+    disagreement = (
+        float(np.linalg.norm(triangulated[:2] - projected[:2])) if np.all(np.isfinite(triangulated)) else float("nan")
+    )
     return {
-        "position": triangulated if source == "triangulation" else projected,
+        "position": np.asarray(position, float),
         "triangulated": triangulated,
-        "plane_projected": projected,
+        "plane_projected": np.asarray(projected, float),
         "gap": gap,
         "disagreement": disagreement,
         "view_disagreement": view_disagreement,
         "source": source,
+        "width": width,
+        "length": length,
+        "heading": heading,
         "height": height,
+        "part": part,
+        "centre": a_centre,
+        "table_z": float(plane[2] + plane[0] * a_centre[0] + plane[1] * a_centre[1]),
     }
 
 
-#: A brick this close to one that has already been tried and failed is treated as that brick. Half a
-#: stud: close enough to catch the same part after the failed grasp nudged it, far enough not to
-#: condemn its neighbour.
+#: A brick this close to one already tried and failed is treated as that brick. Half a stud: close
+#: enough to catch the same part after a failed grasp nudged it, far enough not to condemn a neighbour.
 AVOID_RADIUS_M = 0.004
 
 
 def _matched_pairs(
-    first: ViewResult, second: ViewResult, avoid: Sequence[np.ndarray] = ()
-) -> List[Tuple[Brick, Optional[Brick], float]]:
-    """The bricks view 1 found, each with view 2's counterpart, minus any already tried and failed."""
-    pairs = match_across_views(first, second)
+    first: ViewResult,
+    second: ViewResult,
+    plane: Tuple[float, float, float],
+    avoid: Sequence[np.ndarray] = (),
+    keep_out: Sequence[Tuple[Sequence[float], float]] = (),
+) -> Tuple[List[Tuple[Brick, Optional[Brick], float]], Dict[int, Tuple], Dict[int, Tuple]]:
+    """The bricks view 1 found paired with view 2's, minus anything already tried or out of bounds.
+
+    Filtering happens on the *measured* base-frame centre rather than on anything in pixels, because
+    ``avoid`` and ``keep_out`` are both statements about the table, not about the frame.
+    """
+    first_measured = project_all(first, plane)
+    second_measured = project_all(second, plane)
+    pairs = match_across_views(first, second, first_measured, second_measured)
+
+    def centre_of(pair) -> np.ndarray:
+        return first_measured[pair[0].index][0]
+
     if avoid:
         before = len(pairs)
         pairs = [
-            pair
-            for pair in pairs
-            if all(np.linalg.norm(np.array(pair[0].center_m) - np.asarray(p, float)[:2]) > AVOID_RADIUS_M for p in avoid)
+            p for p in pairs
+            if all(np.linalg.norm(centre_of(p) - np.asarray(a, float)[:2]) > AVOID_RADIUS_M for a in avoid)
         ]
         if len(pairs) < before:
             logger.info(f"Skipping {before - len(pairs)} brick(s) that were already tried and not picked up.")
-    return pairs
+    if keep_out:
+        before = len(pairs)
+        pairs = [
+            p for p in pairs
+            if all(np.linalg.norm(centre_of(p) - np.asarray(c, float)[:2]) > r for c, r in keep_out)
+        ]
+        if len(pairs) < before:
+            logger.info(f"Ignoring {before - len(pairs)} brick(s) sitting in a keep-out area, not in the pile.")
+    return pairs, first_measured, second_measured
 
 
 def build_target(
@@ -657,48 +756,41 @@ def build_target(
     a: Brick,
     b: Optional[Brick],
     match_distance: float,
-    plane: Tuple[float, float, float],
+    located: Dict,
     survey_round: int = 0,
 ) -> GraspTarget:
-    """Turn one of view 1's bricks into everything submodule_2 needs to grasp it.
+    """Turn one of view 1's regions into everything submodule_2 needs to grasp it.
 
-    Every measurement here is view 1's: the rectangle the jaws close on, the axis they close along, the
-    height they stop at, the score that ranked it. Nothing is averaged with view 2, because a view whose
-    centre for this brick can be a brick's width away is not a second measurement of the same rectangle
-    -- and half of a wrong width is still a wrong width. View 2's contribution is the second line of
-    sight inside :func:`locate`, and the numbers that come back with it.
+    Every measurement is view 1's. Nothing is averaged with view 2, because a view whose centre for
+    this brick can be a brick's width away is not a second measurement of the same rectangle -- view
+    2's contribution is the second line of sight inside :func:`locate`.
     """
-    located = locate(first, second, a, b, plane)
-    height = located["height"]
-    x, y = float(located["position"][0]), float(located["position"][1])
-    table_z = float(plane[2] + plane[0] * x + plane[1] * y)
-    position = np.array([x, y, table_z + height])
-
-    per_view = {first.name: np.array(a.center_m)}
+    position = located["position"]
+    per_view = {first.name: np.asarray(located["plane_projected"], float)[:2]}
     if b is not None:
-        per_view[second.name] = np.array(b.center_m)
-
+        per_view[second.name] = np.asarray(second.projected.get(b.index, position[:2]), float)[:2]
     return GraspTarget(
-        position=position,
-        width=a.width_mm / 1000.0,
-        length=a.length_mm / 1000.0,
-        height=height,
-        long_axis_heading=a.long_axis_heading,
-        table_z=table_z,
-        colour=a.colour_name,
-        score=a.score,
-        confidence=a.confidence,
+        position=np.array([position[0], position[1], located["table_z"] + located["height"]]),
+        width=located["width"],
+        length=located["length"],
+        height=located["height"],
+        long_axis_heading=located["heading"],
+        table_z=located["table_z"],
+        colour=str(a.colour_name),
+        score=float(a.score),
+        confidence=float(a.confidence),
         triangulated=located["triangulated"],
         plane_projected=located["plane_projected"],
         triangulation_gap=located["gap"],
         method_disagreement=located["disagreement"],
         view_disagreement=located["view_disagreement"],
-        position_source=located["source"],
+        position_source=f"colour/{located['source']}",
         matched_in_second_view=b is not None,
-        height_measured=bool(a.height_measured),
-        per_view=per_view,
-        survey_round=survey_round,
+        height_measured=located["part"] is not None,
         match_distance=match_distance,
+        survey_round=survey_round,
+        per_view=per_view,
+        approach_width=min(located["width"] + GRIPPER_APPROACH_MARGIN_M, 0.085),
     )
 
 
@@ -710,16 +802,11 @@ def choose_target(
 ) -> Optional[GraspTarget]:
     """The best brick *view 1* found, located as :func:`locate` describes.
 
-    Ranked on view 1's score alone. That score already folds in fingertip clearance, isolation, how much
-    of the brick's outline borders bare table and whether anything stands over it -- all of it measured
-    from the viewpoint the brick was chosen from, which is the point: one view's honest opinion of what
-    it can see, not two views' averaged opinions of two different things.
-
-    Nothing in the pipeline calls this any more -- :func:`run` walks the whole ranked map so it can step
-    over bricks the arm cannot stand over, and the loop uses :func:`survey` -- but it is the smallest
-    statement of the decision, and its simulation twin is the one that gets exercised.
+    Ranked on view 1's colour score alone, which already folds in fingertip clearance, isolation and
+    how much of the outline borders bare table. Nothing calls this any more -- :func:`run` walks the
+    whole ranked map -- but it is the smallest statement of the decision.
     """
-    pairs = _matched_pairs(first, second, avoid)
+    pairs, first_measured, second_measured = _matched_pairs(first, second, plane, avoid)
     if not pairs:
         logger.error(
             f"{first.name} found no graspable brick at all. Either the pile is out of its frame, or nothing "
@@ -729,7 +816,8 @@ def choose_target(
     logger.info(f"{first.name} found {len(pairs)} graspable brick(s); {_pairing_summary(pairs, second)}.")
 
     a, b, match_distance = max(pairs, key=lambda pair: pair[0].score)
-    target = build_target(first, second, a, b, match_distance, plane)
+    located = locate(first, second, a, b, first_measured, second_measured, plane)
+    target = build_target(first, second, a, b, match_distance, located)
     _report_target(target, rank=None)
     return target
 
@@ -741,14 +829,17 @@ def _pairing_summary(pairs: Sequence[Tuple[Brick, Optional[Brick], float]], seco
 
 def _report_target(target: GraspTarget, rank: Optional[int] = None) -> None:
     prefix = "Chosen" if rank is None else f"  {rank:2d}."
-    logger.info(f"{prefix}: {target.describe()} (view 1 score {target.score:.3f}).")
+    engagement = max(float(target.height) - FINGERTIP_CLEARANCE_M, 0.0)
+    logger.info(
+        f"{prefix}: {target.describe()} (colour score {target.score:.3f}, "
+        f"{engagement * 1000:.1f} mm of side wall to pinch, ordered on {grasp_quality(target):.3f})."
+    )
     if not target.height_measured:
         logger.warning(
-            f"      This brick's height is the {target.height * 1000:.1f} mm fallback, not a measurement -- the "
-            "depth stream returned too little on it, which is what a part standing on edge looks like. Its x and "
-            "y are the outline projected onto that assumed height, so if the part is not that tall the position "
-            "is off sideways by the difference times the tangent of the view angle, and the descent stops at the "
-            "wrong height too."
+            f"      This brick's height is the {target.height * 1000:.1f} mm fallback: its footprint matched no "
+            "catalog part, so nothing measured it. Its x and y are the outline projected onto that assumed "
+            "height, so if the part is not that tall the position is off sideways by the difference times the "
+            "tangent of the view angle, and the descent stops at the wrong height too."
         )
     if not target.matched_in_second_view:
         logger.info(
@@ -777,27 +868,24 @@ def _heading_difference(first: float, second: float) -> float:
     return (first - second + math.pi / 2) % math.pi - math.pi / 2
 
 
-# =================================================================================================
-# surveying the whole pile at once
-# =================================================================================================
+# --- surveying the whole pile at once -------------------------------------------------------------
 
 
 @dataclass
 class PileMap:
     """Every brick one pair of looks located, ranked best-first.
 
-    The unit of work is the *survey*, not the brick: the two viewpoints are the expensive part of a
-    pick and they see the whole pile, so every brick view 1 found is located in the same breath and
-    kept here. Targets are served out of :attr:`targets` in score order and removed as they go, so
-    :attr:`remaining` is the count that decides when the pile is worth looking at again.
+    The unit of work is the survey, not the brick: the viewpoints are the expensive part and they see the
+    whole pile. Targets are served from :attr:`targets` in score order and removed as they go, so
+    :attr:`remaining` decides when the pile is worth looking at again.
     """
 
     targets: List[GraspTarget]
     views: List[ViewResult]
     survey_round: int
     surveyed_at: float
-    #: How many bricks have been *attempted* out of this map. Zero means it still describes the pile
-    #: exactly as the camera saw it; anything above zero means the pile has been reached into.
+    #: How many bricks have been *attempted* out of this map. Above zero means the pile has been reached
+    #: into since it was made.
     picks_since_survey: int = 0
 
     @property
@@ -810,10 +898,8 @@ class PileMap:
     def discard_near(self, position_xy: Sequence[float], radius: float) -> List[GraspTarget]:
         """Forget the targets within ``radius`` of a point, returning them. Used after each pick.
 
-        A grasp is not a surgical operation: the jaws come down open around the brick and go back up
-        with it, and anything close enough to be inside that sweep may have been nudged. Its position
-        was measured before the nudge, so dropping it here costs one brick's place in the queue and
-        buys it a fresh measurement at the next survey.
+        The jaws come down open around the brick and go back up with it, so anything inside that sweep may
+        have been nudged since its position was measured. Dropping it buys a fresh measurement next survey.
         """
         centre = np.asarray(position_xy, float)[:2]
         keep, dropped = [], []
@@ -829,6 +915,23 @@ class PileMap:
         )
 
 
+def grasp_quality(target: GraspTarget) -> float:
+    """How good a grasp this is, as the colour score plus the grip depth the score cannot see.
+
+    Ordering on the colour score alone puts a 3.2 mm plate ahead of a 9.6 mm brick whenever the plate
+    is a little cleaner or better isolated, which it usually is -- a plate sitting by itself on bare
+    table is the best-looking grasp in the pile and one of the worst actual ones. Weighting in the
+    fingertip engagement fixes the order without touching the perception.
+
+    Ordering on ``height_measured`` first, as this did while it meant "depth resolved this", is worse
+    than useless now that it means "the catalog recognised this footprint": the parts the catalog
+    recognises are the small simple ones, so it promoted exactly the plates it should have demoted.
+    """
+    engagement = max(float(target.height) - FINGERTIP_CLEARANCE_M, 0.0)
+    depth_term = min(engagement / GRIP_DEPTH_SATURATION_M, 1.0)
+    return (1.0 - GRIP_DEPTH_WEIGHT) * float(target.score) + GRIP_DEPTH_WEIGHT * depth_term
+
+
 def build_pile_map(
     first: ViewResult,
     second: ViewResult,
@@ -838,43 +941,26 @@ def build_pile_map(
     survey_round: int = 0,
     surveyed_at: float = 0.0,
 ) -> PileMap:
-    """Locate every brick view 1 found graspable, ranked by its score.
+    """Locate every brick view 1 found graspable, ranked by score.
 
-    The same pairing and the same positioning :func:`choose_target` does, applied to all of view 1's
-    bricks instead of only the winner. A brick whose line of sight cannot be turned into a point at all
-    -- one running near-horizontal at the edge of the frame, say -- is dropped with a warning rather than
-    taking the whole survey down with it.
-
-    ``keep_out`` is a list of ``(centre_xy, radius)`` circles that are not part of the pile -- the
-    corner the picked bricks are stacked in, above all. Once the heap of already-picked bricks grows
-    bigger than what is left of the pile, the perception's own "largest blob is the pile" heuristic
-    starts pointing the wrong way, and without this the robot would cheerfully re-pick its own output.
+    :func:`choose_target`'s pairing and positioning applied to all of view 1's bricks; one whose ray
+    cannot be turned into a point is dropped with a warning. ``keep_out`` is ``(centre_xy, radius)``
+    circles that are not pile -- the corner picked bricks are stacked in, which once it outgrows the
+    pile would otherwise capture the colour pipeline's "largest blob is the pile" crop.
     """
-    pairs = _matched_pairs(first, second, avoid)
-    if keep_out:
-        before = len(pairs)
-        pairs = [
-            pair
-            for pair in pairs
-            if all(
-                np.linalg.norm(np.array(pair[0].center_m) - np.asarray(centre, float)[:2]) > radius
-                for centre, radius in keep_out
-            )
-        ]
-        if len(pairs) < before:
-            logger.info(f"Ignoring {before - len(pairs)} brick(s) sitting in a keep-out area, not in the pile.")
+    pairs, first_measured, second_measured = _matched_pairs(first, second, plane, avoid, keep_out)
 
     targets: List[GraspTarget] = []
     for a, b, match_distance in pairs:
         try:
-            targets.append(build_target(first, second, a, b, match_distance, plane, survey_round))
+            located = locate(first, second, a, b, first_measured, second_measured, plane)
         except RuntimeError as exception:
-            logger.warning(f"Could not locate the brick at {np.round(a.center_m, 3)} m: {exception} Skipping it.")
-    # Measured heights first, then by score. A guessed height is not just a worse height, it is a worse
-    # *position* -- see GraspTarget.height_measured -- so a brick the depth stream actually resolved is
-    # the better bet even when a part with no depth on it scored higher. They stay in the queue, at the
-    # back, because a pile where nothing has depth is still a pile that has to be emptied.
-    targets.sort(key=lambda t: (t.height_measured, t.score), reverse=True)
+            logger.warning(f"Could not locate region #{a.index}: {exception} Skipping it.")
+            continue
+        if not np.all(np.isfinite(located["position"])):
+            continue
+        targets.append(build_target(first, second, a, b, match_distance, located, survey_round))
+    targets.sort(key=grasp_quality, reverse=True)
 
     pile_map = PileMap(
         targets=targets, views=[first, second], survey_round=survey_round, surveyed_at=surveyed_at
@@ -917,9 +1003,7 @@ def survey(
     )
 
 
-# =================================================================================================
-# looking again, from straight above
-# =================================================================================================
+# --- looking again, from straight above -----------------------------------------------------------
 
 
 def look_straight_down(
@@ -927,11 +1011,11 @@ def look_straight_down(
     position_xy: Sequence[float],
     top_face_z: float,
     heights: Sequence[float] = NADIR_CAMERA_HEIGHTS_M,
-) -> Optional[PileAnalysis]:
-    """Put the camera directly over a point, looking down, and run the perception on what it sees.
+) -> Optional[ViewResult]:
+    """Put the camera directly over a point, looking down, and run the colour pipeline on what it sees.
 
-    Returns ``None`` when no pose in :data:`NADIR_CAMERA_HEIGHTS_M` is reachable -- which is not a
-    failure of the pick, only of the improvement, so the caller keeps the survey's answer.
+    ``None`` when no pose in :data:`NADIR_CAMERA_HEIGHTS_M` is reachable -- a failure of the improvement,
+    not of the pick, so the caller keeps the survey's answer.
     """
     x, y = float(position_xy[0]), float(position_xy[1])
     target = np.array([x, y, top_face_z])
@@ -944,9 +1028,14 @@ def look_straight_down(
         cell.move_arm_to(q)
         cell.advance(VIEW_SETTLE_DURATION)
         view = cell.capture("nadir")
-        analysis = analyse_pile(view, cell.table_plane, cell.robot_type)
-        assign_priorities(analysis.ordered, None, PREGRASP_HEIGHT)
-        return analysis
+        analysis = colour.analyse(cv2.cvtColor(np.asarray(view.image_rgb), cv2.COLOR_RGB2BGR))
+        return ViewResult(
+            name="nadir",
+            eye=np.asarray(view.X_base_camera, float)[:3, 3],
+            joint_configuration=cell.arm_positions(),
+            view=view,
+            analysis=analysis,
+        )
     logger.warning(
         f"No reachable pose above the brick at ({x:.3f}, {y:.3f}) m to look straight down from, at any of "
         f"{[round(h * 100) for h in heights]} cm. Descending on the survey's position instead, which carries "
@@ -958,24 +1047,25 @@ def look_straight_down(
 def refine_over_brick(cell: C.Cell, target: GraspTarget) -> GraspTarget:
     """Re-measure ``target`` from straight above it, and move it there. Modified in place.
 
-    The survey says *which* brick and roughly where; this says where, properly. Only the geometry is
-    taken from the new look -- position, size, height, long axis -- because the choice was view 1's and
-    is not being reopened: a brick that looks worse from overhead is still the brick the arm was sent for.
+    Only the geometry is taken from the new look -- position, size, height, long axis -- because the
+    choice was view 1's and is not being reopened. Best-effort throughout: an unreachable overhead pose,
+    a look that finds nothing, or a mismatched size keeps the survey's numbers and says so.
 
-    Everything about this is best-effort. An unreachable overhead pose, a look that finds nothing where
-    the brick should be, or a part whose size does not match keeps the survey's numbers and says so. The
-    pick then proceeds exactly as it did before this function existed.
+    From straight above the projection has no lever arm, so the height the footprint is projected onto
+    barely matters -- which is exactly what makes this worth the camera move on a colour-only pipeline
+    that has to assume the height in the first place.
     """
     original = np.array(target.position[:2], float)
-    analysis = look_straight_down(cell, original, target.top_face_z)
-    if analysis is None:
+    nadir = look_straight_down(cell, original, target.top_face_z)
+    if nadir is None:
         return target
 
+    measured = project_all(nadir, cell.table_plane)
     candidates = [
-        (float(np.linalg.norm(np.array(brick.center_m) - original)), brick)
-        for brick in analysis.bricks
+        (float(np.linalg.norm(measured[b.index][0] - original)), b)
+        for b in nadir.bricks if b.index in measured
     ]
-    within = [(distance, brick) for distance, brick in candidates if distance <= NADIR_MATCH_TOLERANCE_M]
+    within = [(d, b) for d, b in candidates if d <= NADIR_MATCH_TOLERANCE_M]
     if not within:
         nearest = min(candidates, key=lambda item: item[0])[0] if candidates else float("inf")
         logger.warning(
@@ -986,33 +1076,29 @@ def refine_over_brick(cell: C.Cell, target: GraspTarget) -> GraspTarget:
         return target
 
     distance, brick = min(within, key=lambda item: item[0])
-    if abs(brick.width_mm / 1000.0 - target.width) > NADIR_WIDTH_TOLERANCE_M:
+    centre, width, length, heading, height, part = measured[brick.index]
+    if abs(width - target.width) > NADIR_WIDTH_TOLERANCE_M:
         logger.warning(
-            f"The region {distance * 1000:.0f} mm from the survey's position is {brick.width_mm:.1f} mm wide "
+            f"The region {distance * 1000:.0f} mm from the survey's position is {width * 1000:.1f} mm wide "
             f"where the survey measured {target.width * 1000:.1f} mm. That is a different part, not this one "
             "seen better. Keeping the survey's position."
         )
         return target
 
-    x, y = float(brick.center_m[0]), float(brick.center_m[1])
-    a, b, c = cell.table_plane
-    table_z = float(c + a * x + b * y)
-
+    x, y = float(centre[0]), float(centre[1])
+    table_z = cell.table_z_at(x, y)
     target.nadir_correction = float(np.linalg.norm(np.array([x, y]) - original))
-    target.position = np.array([x, y, table_z + brick.height_m])
+    target.position = np.array([x, y, table_z + height])
     target.table_z = table_z
-    target.width = brick.width_mm / 1000.0
-    target.length = brick.length_mm / 1000.0
-    target.height = float(brick.height_m)
-    target.long_axis_heading = float(brick.long_axis_heading)
-    target.height_measured = bool(brick.height_measured)
-    target.position_source = "nadir_projection"
+    target.width, target.length, target.height = width, length, height
+    target.long_axis_heading = heading
+    target.height_measured = part is not None
+    target.position_source = "colour/nadir_projection"
     target.per_view["nadir"] = np.array([x, y])
 
     logger.success(
         f"Re-look from overhead: the brick is at ({x:.4f}, {y:.4f}) m, "
-        f"{target.nadir_correction * 1000:.1f} mm from where the survey put it. "
-        f"{target.describe()}"
+        f"{target.nadir_correction * 1000:.1f} mm from where the survey put it. {target.describe()}"
     )
     if target.nadir_correction > NADIR_CORRECTION_WARNING_M:
         logger.warning(
@@ -1020,40 +1106,20 @@ def refine_over_brick(cell: C.Cell, target: GraspTarget) -> GraspTarget:
             "survey's position would have missed. The grasp uses the corrected one, but a survey that wrong is "
             "the hand-eye calibration talking: see src/tools/verify_pick_accuracy.py."
         )
-    if not target.height_measured:
-        logger.info(
-            "The overhead look could not measure this part's height either, so its height is still the fallback "
-            "-- but from straight above that costs almost nothing sideways, which is the point of looking again."
-        )
     return target
 
 
-# =================================================================================================
-# going there
-# =================================================================================================
+# --- going there ----------------------------------------------------------------------------------
 
 
 def go_to_pregrasp(cell: C.Cell, target: GraspTarget, pregrasp_height: float = PREGRASP_HEIGHT) -> GraspTarget:
     """Open the jaws, swing over the brick well clear of the pile, then drop to the pregrasp.
 
-    In two moves, not one. A joint-space interpolation from a viewpoint at the edge of the table to a
-    pose three centimetres above one brick in the middle of the pile is a straight line in joint space
-    and something quite different in the world -- typically a diagonal sweep through everything between
-    the two. Going up and over first costs a few seconds and keeps the pile where the perception found
-    it.
-
-    The wrist is already turned so the jaws are square to the brick's long axis: this module knows the
-    orientation the moment it knows the brick, and turning the wrist here means it happens high above
-    the pile rather than centimetres over it.
-
-    Every pose in the descent is solved *before* the arm moves, so a brick that turns out to be
-    unreachable costs nothing but the IK calls -- which is what lets :func:`run` and
-    :class:`PileSession` skip it and take the next-best one instead.
-
-    The retract is the one leg allowed to give ground: it is tried at each of
-    :data:`RETRACT_HEIGHTS_M` and the highest that solves is used, because standing *higher* over a
-    brick is what a UR3e with a long gripper runs out of reach for first, and that leg is only there to
-    keep the arm above the pile on the way across.
+    In two moves, not one: a joint-space line from the table's edge to a pose above the pile sweeps
+    diagonally through everything between. The wrist turns square to the brick up high. Every pose is
+    solved before the arm moves, so an unreachable brick costs only IK calls. The retract is the one leg
+    allowed to give ground -- the highest of :data:`RETRACT_HEIGHTS_M` that solves wins, since it exists
+    only to clear the pile while crossing.
     """
     approach_width = min(target.width + GRIPPER_APPROACH_MARGIN_M, cell.gripper_calibration.max_width)
     target.approach_width = approach_width
@@ -1112,10 +1178,8 @@ def go_to_pregrasp(cell: C.Cell, target: GraspTarget, pregrasp_height: float = P
         cell.move_gripper_to_width(approach_width)
         logger.info(f"Jaws opened to {approach_width * 1000:.1f} mm for a {target.width * 1000:.1f} mm brick.")
 
-    # Via home first. The leg that crosses the table is the only one that can sweep the arm through the
-    # pile, and it starts from a viewpoint pose out at the edge of the workspace with the wrist tilted
-    # over -- the worst possible starting point for a joint-space straight line. Home is elbow up and
-    # central, so both halves of the journey stay high and neither has far to go.
+    # Via home first. The cross-table leg starts from a viewpoint at the edge of the workspace with the
+    # wrist tilted over -- the worst start for a joint-space line. Home is elbow up and central.
     logger.info("Retracting to the home configuration before crossing the table ...")
     cell.move_arm_to(C.HOME_CONFIGURATION)
     logger.info(
@@ -1150,40 +1214,26 @@ def run(
     avoid: Sequence[np.ndarray] = (),
     refine: bool = True,
 ) -> Tuple[GraspTarget, List[ViewResult]]:
-    """The whole of submodule_1: two looks, one decision, one pregrasp.
+    """The whole of submodule_1: two colour looks, one decision, one pregrasp.
 
-    Returns the target for submodule_2 and both views, so a notebook can draw what was seen. Pass the
-    positions of bricks that have already been tried and dropped as ``avoid``.
-
-    The best-scoring brick is not always one the arm can stand over -- top-down poses run out of reach
-    well before the arm does, and a brick 50 cm out is a fine grasp for everything except the geometry.
-    So this walks the ranked list until one of them can actually be reached, exactly as
-    :class:`PileSession` does, rather than raising on the first that cannot. It only gives up when the
-    whole list is exhausted, which is the honest failure: not "this brick is unreachable" but "none of
-    them are".
-
-    ``refine`` re-measures the chosen brick from straight above before descending
-    (:func:`refine_over_brick`), which is what removes the lateral error the survey's viewing angle
-    causes. It costs one camera move and one more pile analysis per pick. Pass ``False`` to descend on
-    the survey's position, which is only worth doing once the hand-eye calibration is good enough that
-    the correction it prints has gone quiet.
+    Returns the target and both views, so a notebook can draw what was seen; pass already-tried
+    positions as ``avoid``. Walks the ranked list until one target can be stood over -- top-down poses
+    run out of reach before the arm does -- and gives up only when it is exhausted.
     """
     views = [observe(cell, name, eye) for name, eye in VIEWPOINTS]
-    pile_map = build_pile_map(
-        views[0], views[1], cell.table_plane, avoid=avoid, surveyed_at=cell.elapsed
-    )
+    pile_map = build_pile_map(views[0], views[1], cell.table_plane, avoid=avoid, surveyed_at=cell.elapsed)
     if not pile_map.remaining:
         raise RuntimeError(
-            f"No brick to grasp. Every region {VIEWPOINTS[0][0]} found either failed the confidence test or was "
-            "too tightly packed for a fingertip."
+            f"No brick to grasp. Every region {VIEWPOINTS[0][0]} found either failed the colour pipeline's "
+            "confidence test, was too tightly packed for a fingertip, or did not cross the table plane. The "
+            "overlay the colour pipeline writes shows what it outlined; start there."
         )
 
     unreachable = 0
     while (target := pile_map.take_best()) is not None:
         try:
             # Re-looked at before the descent is planned, because it moves the brick: every pose
-            # go_to_pregrasp solves is built from the position, so refining afterwards would send the
-            # arm to poses computed for somewhere else.
+            # go_to_pregrasp solves is built from the position.
             if refine:
                 refine_over_brick(cell, target)
             go_to_pregrasp(cell, target, pregrasp_height)
@@ -1201,56 +1251,36 @@ def run(
     raise RuntimeError(
         f"All {unreachable} located brick(s) were out of reach for a straight-down grasp. They are visible and "
         "the arm can touch them by hand, which is not the same thing: the gripper's 231 mm adds horizontal "
-        "reach only when the tool is tilted, and a grasp needs it vertical. Move the pile closer to the base "
-        "-- everything inside about 40 cm of the base axis is comfortable, and the far edge of the board is "
-        "not reachable at all."
+        "reach only when the tool is tilted, and a grasp needs it vertical. Move the pile closer to the base."
     )
 
 
-# =================================================================================================
-# emptying the pile: one survey, many picks
-# =================================================================================================
+# --- emptying the pile: one survey, many picks ----------------------------------------------------
 
-#: Look at the pile again once fewer than this many located bricks are left queued. At 2 the last
-#: brick of a survey is never picked from a map with nothing behind it, so the arm is never left
-#: standing over an empty queue -- and the fresh look happens while there is still a known-good target
-#: in hand to fall back on. Raise it to re-survey more often (safer positions, slower); drop it to 1
-#: to squeeze every last brick out of each survey.
+#: Re-survey once fewer than this many located bricks are queued. At 2 the last brick of a survey is
+#: never picked from an empty map, and the fresh look happens while a known-good target is still in
+#: hand. Raise it to re-survey more often; drop to 1 to squeeze every brick out of each survey.
 RESURVEY_WHEN_REMAINING_BELOW = 2
-#: On top of the jaws' own half-width: how far past the open fingers a brick can be and still be
-#: counted as possibly disturbed by the pick. The pads are 37.5 mm tall and the lifted brick swings a
-#: little as the arm accelerates away, so a centimetre past the fingertips is the honest margin.
+#: On top of the jaws' half-width: how far past the open fingers a brick can be and still count as
+#: possibly disturbed. The pads are 37.5 mm tall and the lifted brick swings, so a centimetre.
 FINGER_DISTURBANCE_MARGIN_M = 0.012
-#: This many failed grasps in a row and the map is not believed any more, whatever it still has queued.
-#: One failure is a brick; three in a row is a map that no longer describes the table in front of it.
+#: This many failed grasps in a row and the map is not believed any more. One failure is a brick;
+#: three in a row is a map that no longer describes the table.
 MAX_CONSECUTIVE_FAILURES = 3
 
 
 class PileSession:
     """Empties the pile, looking at it as few times as possible.
 
-    Line for line the simulation's :class:`m1.simulation.submodule_1.PileSession`, and deliberately so
-    -- it is the same session logic, and the simulator is where it gets exercised. What goes *into* the
-    queue is the one thing that differs, and only in who votes: view 1 alone here, both views there
-    (see the module docstring). Everything below -- the ordering, the re-survey threshold, what a
-    failure means -- is unchanged.
+    Line for line the simulation's :class:`m1.simulation.submodule_1.PileSession`; only who votes on what
+    enters the queue differs (view 1 alone here, both views there). One survey queues every graspable
+    brick by score; each :meth:`next_target` serves the best one left with no camera move; bricks near the
+    one just picked are dropped as possibly knocked; below
+    :data:`RESURVEY_WHEN_REMAINING_BELOW` the pile is looked at again.
 
-    * The first survey locates every brick view 1 found graspable and queues them by score.
-    * Each :meth:`next_target` serves the best one left, straight to the pregrasp, no camera move.
-    * Bricks close enough to the one just picked to have been knocked by the jaws are dropped from the
-      queue rather than trusted (:meth:`PileMap.discard_near`).
-    * When the queue falls below :data:`RESURVEY_WHEN_REMAINING_BELOW`, the pile is looked at again.
-      That is also when the bricks that were buried at the start are finally on top and visible, so the
-      occluded ones get located exactly when it is worth doing.
-
-    **What a cached position risks, and what happens then.** A stale position means the fingers close
-    where the brick used to be. submodule_2 catches that on the width check and the Robotiq's own
-    object-detection flag, opens, and retreats -- so the failure mode is a wasted pick, not a
-    collision. The session then treats the failure according to how much it can blame the map: a brick
-    that failed on a *fresh* target (nothing had been touched since the survey) is a genuinely bad
-    grasp and is avoided for good, while one that failed on a target the pile had since been reached
-    into gets its position remeasured at the next survey and another chance. Three failures in a row
-    force a survey outright.
+    A stale position just means a wasted pick -- submodule_2 catches it on the width check and retreats.
+    A brick that failed on a *fresh* target is a bad grasp and is avoided for good; one that failed on a
+    map the pile had since been reached into is remeasured next survey. Three failures force a survey.
 
     Usage::
 
@@ -1276,11 +1306,9 @@ class PileSession:
         self.resurvey_below = max(1, int(resurvey_below))
         self.max_consecutive_failures = max_consecutive_failures
         self.keep_out = list(default_keep_out() if keep_out is None else keep_out)
-        #: Re-measure each brick from straight above before descending on it. One camera move and one
-        #: pile analysis per pick, in exchange for dropping the survey's viewing-angle error -- see
-        #: :func:`refine_over_brick`. It does not undo the survey: the two viewpoint moves and their two
-        #: analyses are still paid once per survey rather than once per pick, so the looking still goes
-        #: from two per pick to one per pick plus two per survey.
+        #: Re-measure each brick from straight above before descending. One camera move and one pile analysis
+        #: per pick, in exchange for dropping the survey's viewing-angle error -- see :func:`refine_over_brick`.
+        #: The two viewpoint moves are still paid once per survey, not once per pick.
         self.refine = refine
 
         self.map: Optional[PileMap] = None
@@ -1292,7 +1320,7 @@ class PileSession:
         #: Bricks that failed a grasp the map cannot be blamed for. Never retried.
         self.avoid: List[np.ndarray] = []
         #: Bricks that failed while the map was already out of date. Cleared by the next survey, which
-        #: measures them again -- the position they were grasped at was not the position they were in.
+        #: measures them again.
         self.provisional_avoid: List[np.ndarray] = []
         self._consecutive_failures = 0
         self._force_survey = False
@@ -1302,10 +1330,8 @@ class PileSession:
     def next_target(self) -> Optional[GraspTarget]:
         """The next brick to grasp, with the arm already standing over it. None when the pile is done.
 
-        Surveys only when the map is empty, low, or discredited. Targets whose pregrasp turns out to be
-        unreachable are skipped over rather than raising: with a whole map in hand there is always a
-        next-best candidate, which is exactly what the single-shot :func:`run` has to give up and ask
-        the caller for.
+        Surveys only when the map is empty, low, or discredited. Unreachable pregrasps are skipped rather
+        than raised on: with a whole map in hand there is always a next-best candidate.
         """
         while True:
             surveyed_now = False
@@ -1317,8 +1343,8 @@ class PileSession:
             if target is not None:
                 return target
 
-            # The map is empty. If it was taken with the pile untouched since, that is the real answer:
-            # nothing left is graspable. Otherwise the pile has moved under it, and it deserves a look.
+            # The map is empty. Untouched since it was taken means nothing left is graspable; otherwise the
+            # pile has moved under it and deserves a look.
             if surveyed_now or self.map is None or self.map.picks_since_survey == 0:
                 logger.info(
                     f"Nothing left to grasp: {len(self.picked)} brick(s) picked over {self.surveys} survey(s) "
@@ -1346,8 +1372,8 @@ class PileSession:
 
         self._consecutive_failures += 1
         if self._last_target_was_fresh:
-            # Nothing had been touched since this brick was measured, so the position was as good as the
-            # perception gets and the grasp still failed. That is the brick, not the map.
+            # Nothing had been touched since this brick was measured, so the grasp failed on the best
+            # position the perception gets. That is the brick, not the map.
             self.avoid.append(centre)
             logger.info("The grasp failed on a freshly surveyed position; leaving that brick alone from now on.")
         else:
@@ -1367,8 +1393,7 @@ class PileSession:
     def look(self) -> PileMap:
         """Survey the pile now and return the map, instead of waiting for :meth:`next_target` to.
 
-        Only for looking at what the survey produced -- the picking that follows uses the same map, so
-        calling this before the loop costs nothing.
+        The picking that follows uses the same map, so calling this before the loop costs nothing.
         """
         self._survey()
         assert self.map is not None
@@ -1384,8 +1409,7 @@ class PileSession:
                 f"Re-surveying: {self.map.remaining} located brick(s) left, below the {self.resurvey_below} "
                 "threshold. Bricks that were occluded at the start get located now."
             )
-        # The provisional list only ever meant "measured on a pile that has since moved", and this is
-        # the survey that moves it back.
+        # The provisional list only ever meant "measured on a pile that has since moved".
         self.provisional_avoid.clear()
         self._consecutive_failures = 0
         self._force_survey = False
@@ -1399,8 +1423,8 @@ class PileSession:
             if self._is_avoided(target):
                 logger.info(f"Skipping the queued brick at {np.round(target.position[:2], 3)} m; it failed earlier.")
                 continue
-            # Recorded before the counter moves: a target served off a map nothing has been picked from
-            # is measuring the pile that is actually there.
+            # Recorded before the counter moves: a target served off an untouched map is measuring the pile
+            # that is actually there.
             self._last_target_was_fresh = self.map.picks_since_survey == 0
             try:
                 # Before the descent is planned, not after: the poses are all built from the position.
@@ -1447,27 +1471,23 @@ class PileSession:
 def default_keep_out() -> List[Tuple[Sequence[float], float]]:
     """The corner the picked bricks are stacked in, which is not part of the pile.
 
-    Imported late on purpose: submodule_2 imports :class:`GraspTarget` from here, so naming it at
-    module level would close the circle. Where the bricks are put down belongs to the module that puts
-    them down, and this is the one place that has to know about it.
+    Imported late on purpose: submodule_2 imports :class:`GraspTarget` from here, so naming it at module
+    level would close the circle.
     """
     from m1.physical.submodule_2 import DROP_POSITION  # noqa: PLC0415
 
-    # Generous, because the bricks are released from a few centimetres up and bounce: the heap spreads.
+    # Generous: the bricks are released from a few centimetres up and bounce, so the heap spreads.
     return [(np.asarray(DROP_POSITION, float)[:2], 0.11)]
 
 
-# =================================================================================================
-# CLI
-# =================================================================================================
+# --- CLI ------------------------------------------------------------------------------------------
 
 
 def main() -> None:
     """Perceive the pile, choose a brick, and stand over it. The standalone half of the pipeline.
 
-    Kept for the two-terminal bench workflow: run this, look at what it chose, then run submodule_2 in
-    the other terminal. The notebook (``main.ipynb``) runs both halves in one process and does not go
-    through here or through the handoff file.
+    Kept for the two-terminal bench workflow; the notebook runs both halves in one process and does not
+    go through here or the handoff file.
     """
     import click
 
@@ -1481,6 +1501,13 @@ def main() -> None:
     @click.option("--speed-ratio", type=click.IntRange(1, 100), default=C.DEFAULT_SPEED_RATIO, show_default=True)
     @click.option("--pregrasp-height", type=click.FloatRange(0.0, 0.05, min_open=True), default=PREGRASP_HEIGHT, show_default=True)
     @click.option("--table-z", type=float, default=None, help="Level table height, overriding the touched-off plane.")
+    @click.option(
+        "--position-source",
+        type=click.Choice(["triangulation", "plane_projection"]),
+        default=POSITION_SOURCE_PREFERENCE,
+        show_default=True,
+        help="Which of the two estimates the arm is sent to. Both are computed and compared either way.",
+    )
     @click.option("--handoff-path", default=BRICK_HANDOFF_PATH, show_default=True)
     def command(
         robot_type: str,
@@ -1490,8 +1517,11 @@ def main() -> None:
         speed_ratio: int,
         pregrasp_height: float,
         table_z: Optional[float],
+        position_source: str,
         handoff_path: str,
     ) -> None:
+        global POSITION_SOURCE_PREFERENCE
+        POSITION_SOURCE_PREFERENCE = position_source
         with C.build_cell(
             robot_type=robot_type,
             ip_address=ip_address,
