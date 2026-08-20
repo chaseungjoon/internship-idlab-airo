@@ -1,6 +1,6 @@
 """m1 submodule 1 (physical): look at the pile from two viewpoints, pick a brick, stand over it.
 
-**Colour, not depth.** Which regions are bricks comes from :mod:`prototypes.pile_perception`, the
+**Colour, not depth.** Which regions are bricks comes from :mod:`m1.perception_rgb`, the
 robot-free RGB pipeline. The depth stream is captured with each frame and deliberately ignored.
 
 That is a deliberate reversal. The depth path measures every height against a plane, so that one
@@ -67,10 +67,10 @@ if _SRC_DIR not in sys.path:
     sys.path.insert(0, _SRC_DIR)
 from common.config import BRICK_HANDOFF_PATH, PREGRASP_HEIGHT  # noqa: E402
 from m1.physical import cell as C  # noqa: E402
-import prototypes.pile_perception as colour  # noqa: E402
+import m1.perception_rgb as colour  # noqa: E402
 from common.config import FALLBACK_BRICK_HEIGHT  # noqa: E402
 from common.lego_catalog import load_catalog, match_footprint  # noqa: E402
-from m1.physical.submodule_3 import PileView, project_pixels_onto_plane  # noqa: E402
+from m1.perception_rgbd import PileView, project_pixels_onto_plane  # noqa: E402
 
 Brick = colour.Brick
 

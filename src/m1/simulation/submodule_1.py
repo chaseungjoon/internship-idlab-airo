@@ -1,11 +1,11 @@
 """m1 submodule 1 (simulation): look at the pile from two viewpoints, pick a brick, stand over it.
 
-This is the physical pipeline's submodule_3 and submodule_1 fused into the one step they are going to
+This is the physical pipeline's perception and submodule_1 fused into the one step they are going to
 become: perceive the pile, choose which brick to grasp, work out where that brick actually is, and
 park the gripper above it ready for submodule_2 to close on it.
 
 **The perception is not simulated.** The rendered colour and depth go straight into
-``m1.physical.submodule_3.analyse_pile`` -- the same function, the same thresholds, the same scoring
+``m1.perception_rgbd.analyse_pile`` -- the same function, the same thresholds, the same scoring
 that runs against the RealSense on the bench. What this module adds is the part that needs two views:
 
 * **Agreement.** Each viewpoint ranks the pile on its own. A brick both views find, in the same place,
@@ -47,7 +47,7 @@ _SRC_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file_
 if _SRC_DIR not in sys.path:
     sys.path.insert(0, _SRC_DIR)
 from common.config import PREGRASP_HEIGHT  # noqa: E402
-from m1.physical.submodule_3 import Brick, PileAnalysis, analyse_pile, assign_priorities  # noqa: E402
+from m1.perception_rgbd import Brick, PileAnalysis, analyse_pile, assign_priorities  # noqa: E402
 from m1.simulation import world as W  # noqa: E402
 
 #: Where the camera is put to look at the pile, and what it looks at. Two viewpoints roughly 30 cm

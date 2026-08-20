@@ -53,7 +53,12 @@ CAMERA_RESOLUTIONS: Dict[str, Tuple[int, int]] = {
 DEFAULT_CAMERA_RESOLUTION = "720"
 
 # --- calibration ---------------------------------------------------------------------------------------
-DEFAULT_CALIBRATION_DIR = "/home/joon/int2026/calibration_dir"
+#: Output directory of ``airo-camera-toolkit hand-eye-calibration``. The one committed here is this
+#: bench's; point ``AIRO_CALIBRATION_DIR`` elsewhere to use another.
+DEFAULT_CALIBRATION_DIR = os.environ.get(
+    "AIRO_CALIBRATION_DIR",
+    os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "calibration_dir")),
+)
 
 # --- Table height relative to base -----------------------------------------------------------------------------------------
 TABLE_Z = -0.0044
@@ -75,7 +80,7 @@ BRICK_HANDOFF_MAX_AGE = 1800.0
 FOOTPRINT_MATCH_TOLERANCE = 0.0025
 
 # --- the pile ------------------------------------------------------------------------------------------
-# Where submodule_3 leaves the brick it picked out of the pile for submodule_1 to go and stand over.
+# Where the perception leaves the brick it picked out of the pile for submodule_1 to go and stand over.
 # Short-lived on purpose: it describes one arrangement of a pile that every pick disturbs, so a target
 # older than a couple of minutes is describing a pile that no longer exists.
 PILE_TARGET_PATH = os.path.normpath(

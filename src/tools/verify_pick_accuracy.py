@@ -12,7 +12,7 @@ and this fits for both at once:
   camera is not where the calibration says it is, so every ray starts in the wrong place.
 * **An offset growing with distance from the point directly under the camera**, proportional to
   ``tan(angle off vertical)`` -- a height error. Every position here is the brick's outline projected
-  onto the plane of its own top face (:func:`m1.physical.submodule_3.measure_footprint`), so if that
+  onto the plane of its own top face (:func:`m1.perception_rgbd.measure_footprint`), so if that
   plane is at the wrong height the outline slides sideways along the line of sight. The fit reports the
   height error that would explain what it sees, in millimetres.
 * **Neither fits, and the residual stays large** -- the hand-eye *rotation*, which tilts every ray by a
@@ -23,7 +23,7 @@ the region it picked is the brick at all -- the overlay it saves shows what it o
 where the table reads as elevated the best-scoring "brick" is a patch of bare wood, which no calibration
 error explains. And whether the brick's height was *measured* or guessed: a part standing on edge shows
 the camera a narrow top face, depth coverage over it can fall below
-:data:`m1.physical.submodule_3.MIN_DEPTH_COVERAGE`, and the height then falls back to
+:data:`m1.perception_rgbd.MIN_DEPTH_COVERAGE`, and the height then falls back to
 ``config.FALLBACK_BRICK_HEIGHT`` (9.6 mm). A part 25 mm tall projected onto a plane 9.6 mm up lands
 sideways by 15 mm times the tangent of the view angle, and the fingers stop 15 mm above it as well.
 
@@ -59,7 +59,7 @@ from common.config import (  # noqa: E402
     SUPPORTED_ROBOT_TYPES,
 )
 from m1.physical import cell as C  # noqa: E402
-from m1.physical import submodule_3 as perception  # noqa: E402
+from m1 import perception_rgbd as perception  # noqa: E402
 from m1.physical.submodule_1 import VIEWPOINTS, VIEW_TARGET  # noqa: E402
 
 #: A touch further than this from every brick the perception reported is not a measurement of any of

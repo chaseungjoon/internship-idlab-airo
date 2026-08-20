@@ -1,95 +1,89 @@
-# IDLab-AIRO Summer Internship
+# Plan
 
 ## Objective
 
-From a pile of unsorted lego bricks, grab, identify and sort each brick (by shape / shape + color) in an efficient and fast way.
+From a pile of unsorted lego bricks, grasp, identify and sort each brick — by shape, or by shape and
+colour — quickly and without human intervention.
 
-## Execution plan
+## Setup
 
-### Background
+| | |
+|---|---|
+| Arms | Universal Robots UR3e, Realman RM75 |
+| End effectors | Robotiq 2F-85 adaptive gripper, BrainCo Revo2 dexterous hand |
+| Camera | Intel RealSense RGB-D, wrist mounted |
+| Parts | the 104 lines of [lego_list.csv](lego_list.csv), tipped out in one pile |
 
-```bash
-Pile of unsorted lego bricks
-Universal Robots UR3e
-Realman RM75
-Robotiq 2F Adaptive gripper
-BrainCo Bionic Dexterous Hand (BC-Revo-2)
-Realsense RGBD camera
-```
+## Modules
 
-### Outcome
+| | | status |
+|---|---|---|
+| M0 | command the Revo2 hand directly | done |
+| M1 | grasp a single brick out of the pile | done, running on the bench |
+| M2 | identify the brick once it is held | not started |
+| M3 | assign every part in the catalogue to a sorting category | not started |
+| M4 | wire M1–M3 together, add termination checking | not started |
 
-Lego bricks sorted by shape or shape and color
+---
 
-### Modules
+### M0 — the hand · [src/m0](src/m0)
 
-#### Module 0 [src/m0](src/m0)
+Practice, and the source of the grasp poses M1 replays. Learn the joint space, size the poses to
+brick dimensions, and measure where the simulator disagrees with the hardware.
 
-> Objective: Practice - command the BrainCo Revo2 hand directly, in sim and on hardware
+- **In** — 6 normalised finger commands in [0, 1]: thumb, thumb_aux, index, middle, ring, pinky
+- **Out** — hand pose in sim or on hardware, with measured positions and motor currents
 
-- Description: Used to learn the joint space, find and store the grasp poses that M1 replays, and measure where the sim disagrees with the hardware.
+[`simulation/`](src/m0/simulation) is pydrake + Meshcat, kinematic: a playground for the joint space,
+aperture calibration and grasp poses, written to `poses.json`. [`physical/`](src/m0/physical) is
+`bc_stark_sdk` over RS-485: it replays `poses.json`, detects contact from motor current, and records
+what the hand actually reached to `poses_measured.json`. The two share only
+[`hand_model.py`](src/m0/hand_model.py) — the finger table and the normalised pose vector.
 
-- Interface
-  - Input: 6 normalized finger commands in [0, 1] (thumb, thumb_aux, index, middle, ring, pinky)
-  - Output: hand pose in sim / on hardware, measured positions and currents
+### M1 — grasp one brick · [src/m1](src/m1)
 
-- Implementation
-  - Simulation ([src/m0/simulation](src/m0/simulation)): pydrake + Meshcat, kinematic. Playground for the joint space, aperture calibration, grasp poses sized to brick dimensions -> `poses.json`
-  - Physical ([src/m0/physical](src/m0/physical)): bc_stark_sdk over RS-485. Replays `poses.json`, detects contact from motor current, records what the hand reached -> `poses_measured.json`
-  - The two stacks share only [src/m0/hand_model.py](src/m0/hand_model.py): the finger table and the normalized pose vector
+The brick chosen is neither random nor pre-set: it is the best grasp available in the pile as it
+currently lies. See the perception section of the [README](README.md#perception--finding-the-bricks-and-choosing-which-to-pick).
 
-#### Module 1 [src/m1](src/m1)
+- **In** — one RGB-D frame of the pile
+- **Out** — TCP pose and gripper action
 
-> Objective: Grasp a single lego brick from a pile of bricks
+| | |
+|---|---|
+| perception | segment the pile, measure every brick, score every grasp, rank them |
+| submodule 1 | look from two viewpoints, locate the chosen brick, stand over it |
+| submodule 2 | descend, close, verify, lift, verify again |
+| `main.ipynb` | run `submodule 1 → submodule 2` in a loop until the pile is empty |
 
-- Description: From an unorganized pile of lego bricks (from [lego_list.csv](lego_list.csv])), the robotiq gripper will grasp a singular lego brick. The chosen lego brick will not be random nor pre-set, but the most optimal grab in the pile.
+Two viewpoints cost most of the cycle time, so one survey locates *every* graspable brick and the
+picks are served from that map. The pile is looked at again only when the map runs low — which is
+also when the bricks occluded at the start have become the ones on top.
 
-- Interface
-  - Input: Lego brick pile RGBD camera frame
-  - Output: TCP Pose, gripper action
+### M2 — identify the held brick
 
-- Implementation
-  - (MVP) Submodule 0: Grasp single standalone block
-  - Submodule 1: Using triangulation techniques, identify brick positions and determine which brick to grasp from pile, then goto pre-grasp position
-  - Submodule 2: Grasp a brick from the pre-grasp position and lift up
-  - main.ipynb: Run `Submodule 1 -> Submodule 2 -> Submodule 1 ...` loop until termination
+Update a confidence score over brick identity from the camera frames of the brick in the gripper, and
+commit to a `brick_id` once it passes a threshold.
 
-#### Module 2
+- **In** — camera frame(s), grasp pose
+- **Out** — brick id, orientation
 
-> Objective: Identify grasped lego brick
+Two parts: identify orientation, then match against the catalogue. Doing this *after* the pick rather
+than in the pile is deliberate — one frame of a pile does not carry enough of any one brick to
+identify it, and once it is held the camera can look at it from wherever it likes.
 
-- Description: From the camera frames of the grasped lego brick, Module 2 updates the confidence score of the brick identification in real time. When reached a certain confidence score threshold, the brick will be identified wiith brick_id and orientation(optional)
+### M3 — sorting categories
 
-- Interface
-  - Input: Camera frame(s), grasp pose
-  - Output: brick id, brick orientation
+Assign every part in [lego_list.csv](lego_list.csv) to a category by shape and colour. Offline: it
+runs once, before the pipeline, not during it.
 
-- Implementation
-  - Submodule 0: Identify brick orientation
-  - Submodule 1: Identify brick id from database
+### M4 — the loop
 
-#### Module 3
+Wire M1–M3 together and decide when to stop.
 
-> Objective: Sort identified lego brick into a category
+## Open questions
 
-- Description: Categorize each lego brick in [lego_list.csv](lego_list.csv) into a handful of categories regarding its shape and color. This module is not a runtime active module, but will need to run before the execution of the pipeline
-
-#### Module 4
-
-> Objective: Wire Module 1~3 and add termination checking
-
-## Task Scope
-
-## Actions
-
-## Data
-
-## Compute
-
-## Performance metrics
-
-## Success criteria & failure modes
-
-## Usage of software architecture
-
-## Use-cases & behaviors
+- How many frames M2 needs before its confidence is worth acting on, and what to do with a brick it
+  cannot identify.
+- Whether the RGB-D perception goes back into the bench pipeline, which depends on getting the
+  hand-eye calibration error below the plate thickness it has to resolve.
+- Whether shape-only or shape-and-colour categories, which sets how many bins M3 needs.

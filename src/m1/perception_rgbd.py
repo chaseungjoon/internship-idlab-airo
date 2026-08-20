@@ -1,4 +1,20 @@
-"""m1 submodule 3: the pile perception -- segment the pile, measure every brick, score the grasps.
+"""Pile perception, RGB-D: segment the pile, measure every brick, score and rank the grasps.
+
+One capture in -- colour, depth, and where the camera was standing -- and every brick in it comes out
+measured in the robot's base frame and ordered by how safely a top-down parallel-jaw grasp would
+work. :func:`analyse_pile` is the whole of it; nothing in this module touches the robot.
+
+Pipeline:
+  1. build_scene         -- pixels to the base frame, depth to height above the touched-off table
+  2. build_table_model   -- what bare tabletop looks like, seeded from the pixels depth says are flat
+  3. segment_foreground  -- brick pixels vs. table pixels, on height and colour together
+  4. segment_instances   -- cut that foreground into one region per brick
+  5. build_bricks        -- geometry, colour and a confidence per region, with the junk dropped
+  6. measure_clearance   -- fingertip room beside each brick, on a millimetre top-down map
+  7. rank_bricks         -- order by how safely the grasp would work; assign_priorities numbers the top few
+
+The simulator runs this unchanged against rendered frames, which is where the choice gets exercised
+against ground truth. :mod:`m1.perception_rgb` is the same pipeline without the depth stream.
 """
 
 from __future__ import annotations
@@ -20,7 +36,7 @@ from airo_typing import CameraIntrinsicsMatrixType, HomogeneousMatrixType, Numpy
 from loguru import logger
 from scipy import ndimage as ndi
 
-_SRC_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+_SRC_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 if _SRC_DIR not in sys.path:
     sys.path.insert(0, _SRC_DIR)
 from common.config import (  # noqa: E402
@@ -1915,13 +1931,13 @@ def write_pile_target(path: str, manifest: Dict) -> None:
 
 
 def read_pile_target(path: str = PILE_TARGET_PATH, max_age: float = PILE_TARGET_MAX_AGE) -> Optional[Dict]:
-    """Load submodule_3's chosen brick, or ``None`` with a reason logged if it should not be trusted.
+    """Load the perception's chosen brick, or ``None`` with a reason logged if it should not be trusted.
 
     Refused if missing or older than ``max_age``. Every pick disturbs the pile, so an old target is not
     merely stale -- the brick it names has likely moved or been buried.
     """
     if not os.path.exists(path):
-        logger.warning(f"No pile target at {path}; run submodule_3 first.")
+        logger.warning(f"No pile target at {path}; run the perception first.")
         return None
     try:
         with open(path) as f:
@@ -1934,7 +1950,7 @@ def read_pile_target(path: str = PILE_TARGET_PATH, max_age: float = PILE_TARGET_
     if age > max_age:
         logger.warning(
             f"The pile target at {path} is {age / 60:.1f} min old (limit {max_age / 60:.0f} min), so it describes "
-            "an arrangement of the pile that has since been picked at. Re-run submodule_3."
+            "an arrangement of the pile that has since been picked at. Re-run the perception."
         )
         return None
     if payload.get("target") is None:

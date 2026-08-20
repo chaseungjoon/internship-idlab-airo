@@ -5,7 +5,7 @@ to drive it. Nothing here decides anything -- it is the hardware, and the two su
 software, exactly as on the bench.
 
 The point of the simulation is that the *perception and the decision* are not simulated: submodule_1
-hands the rendered colour and depth to ``m1.physical.submodule_3.analyse_pile``, the same code that
+hands the rendered colour and depth to ``m1.perception_rgbd.analyse_pile``, the same code that
 runs against the real RealSense. What this module has to get right, therefore, is the interface that
 code sees -- a colour frame, a metric depth map, an intrinsics matrix, and the camera's pose in the
 robot's base frame -- and it gets it right by construction, because Drake knows all four exactly.
@@ -70,7 +70,7 @@ from pydrake.systems.sensors import CameraInfo, RgbdSensor
 _SRC_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 if _SRC_DIR not in sys.path:
     sys.path.insert(0, _SRC_DIR)
-from m1.physical.submodule_3 import PileView  # noqa: E402
+from m1.perception_rgbd import PileView  # noqa: E402
 
 REPO_ROOT = Path(_SRC_DIR).parent
 ARM_URDF = REPO_ROOT / "src" / "assets" / "ur3e" / "ur3e.urdf"
@@ -563,7 +563,7 @@ class SimWorld:
     def capture(self, name: str = "sim view") -> PileView:
         """Render colour and depth, and pair them with the camera pose the arm is actually holding.
 
-        The returned :class:`PileView` is exactly what ``m1.physical.submodule_3`` gets from a real
+        The returned :class:`PileView` is exactly what ``m1.perception_rgbd`` gets from a real
         RealSense, so the perception cannot tell where it is running -- which is the point.
         """
         camera_context = self.camera.GetMyContextFromRoot(self.context)

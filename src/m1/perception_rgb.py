@@ -1,6 +1,10 @@
 """Pile perception: find every lego brick in an RGB frame of the pile and rank the grasps.
 
-MVP for M1 submodule 3. Takes a still frame of the pile on the table, writes two files next to it:
+The RGB-only half of M1's perception, and the one the bench pipeline currently runs -- see the
+README for why. :mod:`m1.perception_rgbd` is the same pipeline with the RealSense depth map and the
+hand-eye transform on top.
+
+Run on its own it takes a still frame of the pile on the table and writes two files next to it:
 
   <stem>_perception.png    the frame with a solid outline around every brick and the numbers
                            1..5 on the five bricks that should be grasped first
@@ -16,20 +20,20 @@ Pipeline:
   7. estimate_mm_per_px  -- from the 8 mm grid lego is moulded on, so the report is in millimetres
   8. rank_bricks         -- order them by how safely a top-down parallel-jaw grasp would work
 
-RGB only and robot-free: the physical submodule adds the RealSense depth map and the hand-eye
-transform on top. Bricks are not identified as catalogue parts; one frame of a pile does not carry
-enough of a brick to do that, and M2 identifies the brick after it has been picked up anyway.
+Robot-free, which is what makes it the one that can be tuned offline. Bricks are not identified as
+catalogue parts; one frame of a pile does not carry enough of a brick to do that, and M2 identifies
+the brick after it has been picked up anyway.
 
 The one thing a single RGB frame cannot always settle is a tan brick against a knot in the plywood,
 which is why every brick carries a confidence and only confident ones are offered as grasps -- see
-the note above MIN_BRICK_CONFIDENCE. Depth collapses that ambiguity, so the physical submodule
-should replace the confidence cues with a height-above-table test and keep everything else.
+the note above MIN_BRICK_CONFIDENCE. Depth collapses that ambiguity, which is what
+:mod:`m1.perception_rgbd` replaces the confidence cues with.
 
-Reads int2026/lego_pic/ and writes back into it unless told otherwise:
+Reads ``lego_pic/`` and writes back into it unless told otherwise:
 
-    python src/prototypes/pile_perception.py
-    python src/prototypes/pile_perception.py --debug
-    python src/prototypes/pile_perception.py lego_pic/lego_pile_20260810_140851.jpg --out-dir /tmp/out
+    python src/m1/perception_rgb.py
+    python src/m1/perception_rgb.py --debug
+    python src/m1/perception_rgb.py lego_pic/lego_pile_20260810_140851.jpg --out-dir /tmp/out
 """
 
 from __future__ import annotations

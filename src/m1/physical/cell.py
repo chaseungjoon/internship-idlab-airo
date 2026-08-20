@@ -41,7 +41,7 @@ from common.config import (  # noqa: E402
     load_table_plane,
     open_camera,
 )
-from m1.physical.submodule_3 import PileView, capture_pile_view  # noqa: E402
+from m1.perception_rgbd import PileView, capture_pile_view  # noqa: E402
 
 # --- the table and the pile -----------------------------------------------------------------------
 

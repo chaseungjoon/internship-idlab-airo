@@ -18,7 +18,7 @@ while the table sits there in plain sight, and they need opposite fixes:
    entire tabletop above the band -- and above ``FOREGROUND_STRONG_HEIGHT_M`` (2.5 mm) as well, which
    is the same table coming back as dozens of "bricks".
 
-So this script goes to each viewpoint, builds exactly the :class:`~m1.physical.submodule_3.Scene` the
+So this script goes to each viewpoint, builds exactly the :class:`~m1.perception_rgbd.Scene` the
 perception builds, and prints what the two masks actually contain: how much of the reachable frame has
 depth at all, where the height readings sit relative to the touched-off plane, and -- by fitting a
 plane to the depth itself -- how far the camera's idea of the tabletop is from the arm's, in offset and
@@ -49,7 +49,7 @@ if _SRC_DIR not in sys.path:
     sys.path.insert(0, _SRC_DIR)
 from common.config import DEFAULT_CALIBRATION_DIR, DEFAULT_CAMERA_RESOLUTION, SUPPORTED_ROBOT_TYPES  # noqa: E402
 from m1.physical import cell as C  # noqa: E402
-from m1.physical import submodule_3 as perception  # noqa: E402
+from m1 import perception_rgbd as perception  # noqa: E402
 from m1.physical.submodule_1 import VIEWPOINTS, VIEW_TARGET  # noqa: E402
 
 #: Height bins the text histogram is drawn over, in millimetres above the touched-off plane. Wide
@@ -252,7 +252,7 @@ def command(
         print(
             "  Little of the reachable frame has depth\n"
             "      -> the sensor is not seeing the tabletop: dark, glossy or featureless wood, or the\n"
-            f"         exposure is wrong. Nothing in submodule_3 can fix that.\n\n"
+            f"         exposure is wrong. Nothing in the perception can fix that.\n\n"
             "  Depth is there, but the heights sit above the 1.5 mm band and the camera's own plane is\n"
             f"  more than {SUSPICIOUS_OFFSET_MM:.0f} mm or {SUSPICIOUS_TILT_DEG:.1f} deg from the touched-off one\n"
             "      -> the two calibrations disagree, and the segmentation is measuring that disagreement\n"
