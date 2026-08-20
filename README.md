@@ -110,40 +110,6 @@ The simulator runs the RGB-D path unchanged, where the hand-eye transform is exa
 
 ---
 
-## Layout
-
-```text
-src/
-  common/          shared libraries — imported, never run
-    config.py          robot, camera and calibration constants; connections
-    lego_catalog.py    part catalogue: meshes, footprints, footprint matching
-    scene.py           Drake scene building (arm, gripper, meshcat)
-  m1/              module 1 — grasp one brick from the pile
-    perception_rgbd.py   RGB-D pile perception: segment, measure, score
-    perception_rgb.py    RGB-only pile perception, runs on a still photograph
-    simulation/          Drake + Meshcat: world.py, submodule_1.py, submodule_2.py, main.ipynb
-    physical/            the bench: cell.py, submodule_1.py, submodule_2.py, main.ipynb
-  m0/              module 0 — command the BrainCo Revo2 hand directly (simulation/, physical/)
-  tools/           command-line utilities, run by hand
-    calibrate_table.py     touch the tabletop with the arm and fit a plane — run this first
-    capture.py             grab frames from the wrist camera
-    diagnose_table.py      why the perception cannot find bare table, per viewpoint
-    verify_pick_accuracy.py  measure how far the perception's brick is from the real one
-    measure_table_z.py     cross-check hand-eye against the board (superseded for table height)
-    teach_pose.py          freedrive the arm and print where it ended up
-  assets/          URDFs and meshes: ur3e, robotiq_2f_85, rm75, revo2
-
-lego_3d/           lego part meshes and URDFs, built from the LDraw parts library
-lego_pic/          photographs of the pile, the RGB perception's input
-calibration_dir/   hand-eye calibration output for this bench
-docs/              figures used here
-```
-
-Everything puts `src/` on `sys.path` and imports as `common.config`, `m1.perception_rgbd`,
-`m1.physical.cell`. Scripts run by path from the repo root: `python src/tools/calibrate_table.py`.
-
----
-
 ## Setup
 
 Prerequisites: python 3.10, conda.
@@ -188,12 +154,4 @@ python src/m1/physical/submodule_2.py    # grasp it and lift it
 ```
 
 Set `AIRO_CALIBRATION_DIR` to use a hand-eye calibration other than the one committed here.
-
-## Running M0
-
-The Revo2 hand on its own, in simulation and on hardware. Hardware needs the vendor SDK:
-
-```bash
-pip install bc-stark-sdk
-jupyter notebook src/m0/simulation/hand_basics.ipynb
-```
+``
